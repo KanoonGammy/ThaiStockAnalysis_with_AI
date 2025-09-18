@@ -20,7 +20,12 @@ st.header("APG Station: Technical Signals")
 
 def import_data(period = 3650):
     # import data price
-    dp = pd.read_csv("source_price.csv").tail(period) # from souce
+        # 1. สร้าง URL สำหรับดาวน์โหลดเป็นไฟล์ CSV
+    sheet_id = "1Uk2bEql-MDVuEzka4f1Y7bMBM_vbob7mXb75ITUwwII"  # << ใส่ ID ของชีท (ส่วนที่อยู่ใน URL)
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+
+    # 2. อ่านข้อมูลจาก URL ด้วย pandas และเลือกเฉพาะท้ายตารางตามตัวแปร period
+    dp = pd.read_csv(sheet_url).tail(period)
     dp.Date = pd.to_datetime(dp["Date"]) # set Date as Datetime
     dp = dp.set_index("Date") # set index
 
@@ -182,4 +187,5 @@ with tab2:
         long_ma = int(st.text_input("ระบุเส้นค่าเฉลี่ยระยะยาว",4, key = "Optimization Int2"))
         st.dataframe(pf.xs((short_ma,long_ma), level= ("fast_window", "slow_window")).stats())
         
+
     
