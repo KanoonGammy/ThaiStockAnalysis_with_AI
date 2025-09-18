@@ -8,4 +8,5 @@ openpyxl
 scipy
 pandas-ta
 seaborn
+google.generativeai
 
