@@ -9,4 +9,5 @@ scipy
 pandas-ta
 seaborn
 google.generativeai
+python-dotenv
 
