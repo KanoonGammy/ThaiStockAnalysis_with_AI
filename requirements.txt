@@ -7,4 +7,5 @@ prophet
 openpyxl
 scipy
 pandas-ta
+seaborn
 
