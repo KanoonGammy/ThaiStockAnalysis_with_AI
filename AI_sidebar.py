@@ -38,22 +38,18 @@ def prepare_ai_datasource(data_tuple):
     # 52 Week High/Low data
     source_52whl = pd.concat([source_52SET, source_52mai], ignore_index=True)
     if not source_52whl.empty and 'Name' in source_52whl.columns:
-        # Select only the new, essential columns to merge, excluding potential duplicates like market/sector
         cols_to_merge_52whl = ['Name', 'High', 'Low', 'Close', '52WHL', 'ROC_10']
         valid_cols = [col for col in cols_to_merge_52whl if col in source_52whl.columns]
         
         if not master_df.empty:
-            # Merge only new info, using outer join to keep all names
             master_df = pd.merge(master_df, source_52whl[valid_cols].drop_duplicates(subset=['Name']), on="Name", how="outer")
         else:
-            # If master is empty, start with this data
             master_df = source_52whl[valid_cols].drop_duplicates(subset=['Name'])
 
     # VP Change data - Selectively merge only the change columns
     for df, interval in [(VP_change_D_data, "D"), (VP_change_W_data, "W"), (VP_change_M_data, "M"), (VP_change_3M_data, "3M")]:
         if not df.empty and 'Symbols' in df.columns:
             df_renamed = df.rename(columns={"Symbols": "Name"})
-            # Define the specific columns to merge for this interval
             vp_cols_to_merge = ['Name', f'Price %Change {interval}', f'Volume %Change {interval}']
             valid_vp_cols = [col for col in vp_cols_to_merge if col in df_renamed.columns]
             
@@ -74,7 +70,7 @@ def prepare_ai_datasource(data_tuple):
         else:
             master_df = df_perf.drop_duplicates(subset=['Name'])
             
-    # Clean up any merge-generated duplicate columns just in case
+    # Clean up any merge-generated duplicate columns
     master_df = master_df.loc[:, ~master_df.columns.str.endswith('_x')]
     master_df = master_df.loc[:, ~master_df.columns.str.endswith('_y')]
     
@@ -89,8 +85,9 @@ def get_ai_response(prompt, data_for_ai_tuple):
         return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
 
     try:
+        # --- [สำคัญ] แก้ไขชื่อโมเดลตรงนี้ ---
         if 'model' not in st.session_state:
-            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash')
+            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
         processed_data = prepare_ai_datasource(data_for_ai_tuple)
         
