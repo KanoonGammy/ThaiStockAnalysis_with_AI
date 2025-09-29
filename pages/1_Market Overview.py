@@ -752,103 +752,80 @@ data_for_ai_tuple = (
 )
 
 
+# Create a placeholder for AI responses in the main area of the app
+# สร้างพื้นที่ว่างรอแสดงผลในหน้าจอหลัก
+ai_response_placeholder = st.empty()
+
+
 with st.sidebar:
-    st.header("AI Analysis")
-    
-    st.subheader("Daily Market Summary")
-    # Add a button for the daily market summary
-    if st.button("สร้างบทสรุปภาพรวมตลาดรายวัน"):
-        # This is the prompt for the daily market summary
-        daily_summary_prompt = f"""
-            **Persona:** You are a Market Strategist providing a daily technical briefing to a fund management team. Your summary must be based *only on the most recent data provided*. Your goal is to identify sector trends and highlight specific, actionable stock opportunities or warnings.
+    st.header("🤖 AI Analysis")
+    st.markdown("ถามคำถามเกี่ยวกับภาพรวมตลาดหรือหุ้นรายตัว")
 
-            **Task:** Generate a "Daily Technical Market Summary" for the Thai stock market using the provided data.
+    # --- AI Market Q&A Section ---
+    st.subheader("Market Q&A")
+    market_question = st.text_area("ถามเกี่ยวกับภาพรวมตลาด...", 
+                                   value="ช่วยสรุปภาพรวมตลาดและหุ้นที่โดดเด่นในวันนี้",
+                                   height=100)
 
-            **Required Output Format (Strictly follow this structure):**
+    if st.button("วิเคราะห์ภาพรวมตลาด", key="market_analysis_button"):
+        # Prompt สำหรับถาม-ตอบภาพรวมตลาด (ยืดหยุ่นกว่าเดิม)
+        market_qna_prompt = f"""
+            **Persona:** You are a Market Strategist. Your task is to answer the user's question based *strictly and solely* on the provided CSV data. Do not use any external knowledge.
 
-            **Daily Market Technical Summary: {datetime.date.today().strftime('%Y-%m-%d')}**
+            **User's Question:** "{market_question}"
 
-            **1. Overall Market Outlook:**
-            * Based on the aggregate data (e.g., average RS_Rank, price changes), what is the immediate market sentiment? (e.g., "Slightly Bullish," "Bearish consolidation," "Mixed with sector rotation").
-
-            **2. Sector-by-Sector Analysis:**
-
-            For each major `sector` in the data, provide the following:
-
-            * **[Sector Name] (e.g., TECH, FINCIAL, RESOURC):**
-                * **Sector Health:** [Briefly describe the sector's momentum today. Is it leading or lagging the market? Use average price/volume change as evidence.]
-                * **🔥 Top Momentum Stock:**
-                    * **[Stock Name]:** [Identify the stock with the best combination of low `RS_Rank` and high positive `Price %Change D`. State these key metrics.]
-                    * **Insight:** [Provide a brief, actionable insight, e.g., "Showing strong leadership characteristics, breaking out on high volume."]
-                * **📊 Notable Activity:**
-                    * **[Stock Name]:** [Identify a different stock with an interesting signal, e.g., massive `Volume %Change D`, or approaching a 52-week high (`52WHL` > 0.9) with positive `ROC_10`.]
-                    * **Insight:** [Provide a brief, actionable insight, e.g., "Sudden institutional interest detected, worth adding to watchlist for potential follow-through."]
-                * **⚠️ Stock to Watch:**
-                    * **[Stock Name]:** [Identify a stock showing potential weakness, e.g., a high `RS_Rank` combined with a significant negative `Price %Change D` or a negative `ROC_10` while being near its 52-week high.]
-                    * **Insight:** [Provide a brief, actionable insight, e.g., "Showing signs of exhaustion, potential for a short-term pullback."]
-
-            **Concluding Summary:**
-            * Briefly summarize which sectors are showing the most strength and which are weakest.
-            * Highlight the single most compelling stock idea (bullish or bearish) from the analysis above.
-
-            **Language:** Thai (ภาษาไทย)
+            **Instructions:**
+            1. Analyze the entire dataset to formulate your answer.
+            2. Ground every conclusion in specific data points from the file (e.g., "Sector X is leading, as shown by its average 'Price %Change D' of Y%").
+            3. If the question is broad (e.g., "summarize the market"), provide a concise overview of market sentiment, top-performing/worst-performing sectors, and mention 2-3 specific stocks with notable activity (high momentum, volume spikes, etc.).
+            4. Your answer must be in Thai (ภาษาไทย).
         """
-        # Call the new market summary function
-        AI_Market_Summary(daily_summary_prompt, data_for_ai_tuple)
+        # เรียกใช้ฟังก์ชัน AI และรอรับ 'response_text' กลับมา
+        response_text = AI_Market_Summary(market_qna_prompt, data_for_ai_tuple)
+        
+        # แสดงผลลัพธ์ใน placeholder ที่เราสร้างไว้ข้างนอก
+        if response_text:
+            ai_response_placeholder.markdown(f"### 📈 **บทวิเคราะห์ภาพรวมตลาด:**\n---\n{response_text}")
 
     st.divider()
 
-    st.subheader("Single Stock Analysis")
-    stock_name_input = str.upper(st.text_input("ระบุชื่อหุ้นที่ต้องการวิเคราะห์", ""))
+    # --- AI Single Stock Q&A Section ---
+    st.subheader("Single Stock Q&A")
+    stock_name_input = str.upper(st.text_input("ระบุชื่อหุ้น", ""))
+    
+    # ใช้ session state เพื่อเก็บคำถามเริ่มต้น ป้องกันการ reset
+    if 'stock_question' not in st.session_state:
+        st.session_state.stock_question = f"ช่วยวิเคราะห์หุ้น {stock_name_input} หน่อยครับ"
 
-    # This part runs only when a stock name is entered
-    if stock_name_input:
-        # This is the prompt for single-stock analysis
+    # อัปเดตคำถามเมื่อชื่อหุ้นเปลี่ยน
+    if stock_name_input and f" {stock_name_input} " not in st.session_state.stock_question:
+         st.session_state.stock_question = f"ช่วยวิเคราะห์หุ้น {stock_name_input} หน่อยครับ"
+
+    stock_question = st.text_area("ถามเกี่ยวกับหุ้นตัวนี้...", 
+                                  key='stock_question',
+                                  height=100)
+
+    # ปุ่มจะทำงานเมื่อมีการใส่ชื่อหุ้นเท่านั้น
+    if st.button("วิเคราะห์หุ้นรายตัว", key="stock_analysis_button", disabled=not stock_name_input):
+        # Prompt สำหรับวิเคราะห์หุ้นรายตัว
         single_stock_prompt = f"""
-            **Persona:** You are a Senior Equity Analyst reporting to a Fund Manager. Your analysis must be concise, data-driven, and lead to a clear investment thesis. Avoid generic statements. Focus on relative performance and sector dynamics.
+            **Persona:** You are a Senior Equity Analyst. Answer the user's question about the stock '{stock_name_input}' using *only* the provided data for context and comparison.
 
-            **Context:** The provided CSV contains technical data for Thai stocks. The key stock for analysis is '{stock_name_input}'. The rest of the data is for sector and market context.
+            **User's Question:** "{stock_question}"
 
-            **Data Dictionary (Interpret these metrics from a fund manager's perspective):**
-            * **RS_Rank:** The stock's momentum ranking against the entire market (lower is better). A rank in the top quartile suggests significant outperformance.
-            * **Return:** The underlying weighted return score. Use this to gauge the magnitude of momentum.
-            * **Price/Volume %Change (D, W, M, 3M):** Analyze the *sequence* of these values to determine trend acceleration or deceleration. Is the short-term strength confirming the long-term trend?
-            * **52WHL:** A measure of the stock's position within its 52-week range. A value > 0.8 suggests the stock is near its highs (potential strength or exhaustion), while < 0.2 suggests it's near its lows (potential value or weakness).
-            * **ROC_10:** Short-term (2-week) momentum. Crucial for identifying entry/exit points. A positive ROC_10 near a 52-week high is bullish. A negative ROC_10 near a 52-week high is a bearish divergence.
-            * **Performance 100 Days:** Mid-term cumulative performance.
-            * **Volume Trade Ratio in Its Sector:** Market share of trading volume within its sector. A high or increasing ratio indicates significant institutional interest.
-            * **VWAP & Cumulative_VWAP:** Volume-Weighted Average Price. Use this as a short-term trend indicator. Is the current price above or below the recent VWAP?
+            **Data Dictionary & Analysis Guide:**
+            * **RS_Rank:** Market momentum ranking (lower is better).
+            * **Price/Volume %Change (D, W, M):** Analyze the sequence to determine trend acceleration/deceleration.
+            * **52WHL & ROC_10:** Combine these. Is it strong near highs (>0.8) or weak near lows (<0.2)?
+            * **Sector Comparison:** Compare its metrics to other stocks in the same sector within the data.
+            * **Core Task:** Formulate a data-driven answer to the user's question. If they ask for a general analysis, provide a structured summary covering momentum, trend, price position, and a concluding thesis (Bullish/Bearish/Neutral).
 
-            **Required Output Format (Strictly follow this structure):**
-
-            **Stock:** '{stock_name_input}'
-            **Sector:** [Identify from data]
-            **Market:** [Identify from data]
-
-            **1. Executive Summary (3-4 bullet points):**
-            * Provide a top-level summary of the analysis.
-            * State the overall investment thesis (e.g., Bullish, Bearish, Neutral, Watchlist).
-            * Mention the one or two most critical data points supporting the thesis.
-
-            **2. Core Technical Analysis:**
-            * **Momentum & Relative Strength:** Is the RS_Rank elite or poor? How does its `Return` score look? Is it a market leader or laggard?
-            * **Trend Analysis:** Based on the D, W, M, 3M Price & Volume changes, is the trend strengthening, weakening, or consolidating? Is volume confirming the price trend?
-            * **Price Positioning:** Analyze the 52WHL and ROC_10 together. Is the stock showing strength near its highs, or is it showing weakness?
-
-            **3. Sector & Peer Comparison:**
-            * How does the stock's RS_Rank and Performance 100 Days compare to other stocks in the same sector provided in the data?
-            * Does its Volume Trade Ratio suggest it is a dominant player in its sector?
-            * Based on this comparison, is it a potential sector leader?
-
-            **4. Investment Thesis & Risk Assessment:**
-            * **Key Strengths (Bull Case):** List 2-3 key bullish data points.
-            * **Potential Risks (Bear Case):** List 2-3 key bearish data points or technical red flags.
-            * **Recommendation:** Based on the analysis, provide a clear recommendation (e.g., "Consider for inclusion in a growth portfolio," "Avoid due to weakening momentum," "Add to watchlist, pending confirmation of trend reversal.").
-
-            **Handling Missing Data:** If any key data points are missing (`NaN`), explicitly state this in your analysis (e.g., "RS_Rank is unavailable, limiting a full momentum assessment."). Then, provide the best possible analysis based on the available data. Do not refuse to answer; work with what you have and state the limitations.
-
-            **Language:** Thai (ภาษาไทย)
+            **Crucial Rule:** Your entire analysis must be derived solely from the provided data. If data is missing (NaN), state it and proceed with the available information.
+            **Language:** Thai (ภาษาไทย).
         """
-        # Call the single stock analysis function
-        AI_Overviews(single_stock_prompt, data_for_ai_tuple, stock_name_input)
+        response_text = AI_Overviews(single_stock_prompt, data_for_ai_tuple, stock_name_input)
+        
+        if response_text:
+            ai_response_placeholder.markdown(f"### 🔬 **บทวิเคราะห์หุ้น: {stock_name_input}**\n---\n{response_text}")
+
 
