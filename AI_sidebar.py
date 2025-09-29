@@ -7,16 +7,13 @@ import time # Import the time module for handling delays
 from dotenv import load_dotenv
 
 # Load environment variables for the API key
-# โหลดค่า API Key จากไฟล์ .env
 load_dotenv()
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 
 # Configure the generative AI model with the API key
-# ตั้งค่า API Key หากมี
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
 else:
-    # แสดงคำเตือนหากไม่พบ API Key
     st.warning("Google API Key not found. Please set it in your environment variables for AI analysis to work.")
 
 
@@ -24,88 +21,111 @@ else:
 def prepare_ai_datasource(data_tuple):
     """
     Prepares and merges all necessary data sources into a single DataFrame for AI analysis.
-    This function is cached to avoid re-computation.
-    It takes a tuple of DataFrames as input.
+    This function is cached to avoid re-computation and is now more robust against empty dataframes.
     """
-    # Clean all dataframes in the tuple by removing 'Unnamed' columns which can cause merge errors
-    cleaned_tuple = []
-    for df in data_tuple:
-        if isinstance(df, pd.DataFrame):
-            # Find and drop any columns that start with 'Unnamed:'
-            unnamed_cols = [col for col in df.columns if str(col).startswith('Unnamed:')]
-            cleaned_tuple.append(df.drop(columns=unnamed_cols) if unnamed_cols else df)
-        else:
-            # Keep non-DataFrame elements as they are
-            cleaned_tuple.append(df)
-
-    # Unpack the cleaned dataframes
+    # Unpack the tuple
     (rs_score_data, VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
      source_52SET, source_52mai, perf_source_SET, perf_source_mai,
-     SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod, mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod) = tuple(cleaned_tuple)
+     SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod, mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod) = data_tuple
 
+    # --- Robustly combine and simplify data sources ---
+    AIdata_52WHL = pd.concat([source_52SET, source_52mai], ignore_index=True) if not source_52SET.empty or not source_52mai.empty else pd.DataFrame()
 
-    # Rename columns for consistency
-    VP_change_D_data = VP_change_D_data.rename(columns={"Symbols": "Name"})
-    VP_change_W_data = VP_change_W_data.rename(columns={"Symbols": "Name"}).drop("MarketCap", axis=1, errors='ignore')
-    VP_change_M_data = VP_change_M_data.rename(columns={"Symbols": "Name"}).drop("MarketCap", axis=1, errors='ignore')
-    VP_change_3M_data = VP_change_3M_data.rename(columns={"Symbols": "Name"}).drop("MarketCap", axis=1, errors='ignore')
-    SET_Stacked_bar = SET_Stacked_bar.reset_index(names="Name")
-    mai_Stacked_bar = mai_Stacked_bar.reset_index(names="Name")
+    perf_list = []
+    if not perf_source_SET.empty and perf_source_SET.shape[1] > 1:
+        perf_list.append(perf_source_SET.iloc[:, [0, -1]])
+    if not perf_source_mai.empty and perf_source_mai.shape[1] > 1:
+        perf_list.append(perf_source_mai.iloc[:, [0, -1]])
+    if perf_list:
+        AIdata_Performance = pd.concat(perf_list, ignore_index=True)
+        AIdata_Performance.columns = ["Name", "Performance 100 Days"]
+    else:
+        AIdata_Performance = pd.DataFrame(columns=["Name", "Performance 100 Days"])
 
-    # Combine and simplify data sources
-    AIdata_52WHL = pd.concat([source_52SET, source_52mai])
-    AIdata_Performance = pd.concat([perf_source_SET.iloc[:, [0, -1]], perf_source_mai.iloc[:, [0, -1]]])
-    AIdata_Performance.columns = ["Name", "Performance 100 Days"]
-    AIdata_Stacked_Volume = pd.concat([SET_Stacked_bar.iloc[:, [0, -1]], mai_Stacked_bar.iloc[:, [0, -1]]])
-    AIdata_Stacked_Volume.columns = ["Name", "Volume Trade Ratio in Its Sector"]
-    AIdata_VWAP = pd.concat([SET_VWAP.iloc[:, [0, -1]], mai_VWAP.iloc[:, [0, -1]]])
-    AIdata_VWAP.columns = ["Name", "Volume Weighted Average Price"]
-    AIdata_Cumulative_VWAP = pd.concat([SET_VWAP_cumprod.iloc[:, [0, -1]], mai_VWAP_cumprod.iloc[:, [0, -1]]])
-    AIdata_Cumulative_VWAP.columns = ["Name", "Cumulative_VWAP"]
+    stack_vol_list = []
+    if not SET_Stacked_bar.empty and SET_Stacked_bar.shape[1] > 1:
+        stack_vol_list.append(SET_Stacked_bar.reset_index().iloc[:, [0, -1]])
+    if not mai_Stacked_bar.empty and mai_Stacked_bar.shape[1] > 1:
+        stack_vol_list.append(mai_Stacked_bar.reset_index().iloc[:, [0, -1]])
+    if stack_vol_list:
+        AIdata_Stacked_Volume = pd.concat(stack_vol_list, ignore_index=True)
+        AIdata_Stacked_Volume.columns = ["Name", "Volume Trade Ratio in Its Sector"]
+    else:
+        AIdata_Stacked_Volume = pd.DataFrame(columns=["Name", "Volume Trade Ratio in Its Sector"])
+        
+    vwap_list = []
+    if not SET_VWAP.empty and SET_VWAP.shape[1] > 1:
+        vwap_list.append(SET_VWAP.iloc[:, [0, -1]])
+    if not mai_VWAP.empty and mai_VWAP.shape[1] > 1:
+        vwap_list.append(mai_VWAP.iloc[:, [0, -1]])
+    if vwap_list:
+        AIdata_VWAP = pd.concat(vwap_list, ignore_index=True)
+        AIdata_VWAP.columns = ["Name", "Volume Weighted Average Price"]
+    else:
+        AIdata_VWAP = pd.DataFrame(columns=["Name", "Volume Weighted Average Price"])
 
-    # Merge all data into a single DataFrame
-    AIdata_ALL = rs_score_data.merge(AIdata_52WHL, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(VP_change_D_data, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(VP_change_W_data, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(VP_change_M_data, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(VP_change_3M_data, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(AIdata_Performance, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(AIdata_Stacked_Volume, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(AIdata_VWAP, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(AIdata_Cumulative_VWAP, how="outer", on="Name")
+    cum_vwap_list = []
+    if not SET_VWAP_cumprod.empty and SET_VWAP_cumprod.shape[1] > 1:
+        cum_vwap_list.append(SET_VWAP_cumprod.iloc[:, [0, -1]])
+    if not mai_VWAP_cumprod.empty and mai_VWAP_cumprod.shape[1] > 1:
+        cum_vwap_list.append(mai_VWAP_cumprod.iloc[:, [0, -1]])
+    if cum_vwap_list:
+        AIdata_Cumulative_VWAP = pd.concat(cum_vwap_list, ignore_index=True)
+        AIdata_Cumulative_VWAP.columns = ["Name", "Cumulative_VWAP"]
+    else:
+        AIdata_Cumulative_VWAP = pd.DataFrame(columns=["Name", "Cumulative_VWAP"])
+
+    # List of all dataframes to merge
+    dfs_to_merge = [
+        rs_score_data, AIdata_52WHL, 
+        VP_change_D_data.rename(columns={"Symbols":"Name"}), 
+        VP_change_W_data.rename(columns={"Symbols":"Name"}), 
+        VP_change_M_data.rename(columns={"Symbols":"Name"}), 
+        VP_change_3M_data.rename(columns={"Symbols":"Name"}),
+        AIdata_Performance, AIdata_Stacked_Volume, AIdata_VWAP, AIdata_Cumulative_VWAP
+    ]
+    
+    # Start with a base dataframe if available
+    AIdata_ALL = pd.DataFrame()
+    if not rs_score_data.empty:
+        AIdata_ALL = rs_score_data.copy()
+
+    # Iteratively merge other dataframes
+    for df in dfs_to_merge[1:]:
+        if not df.empty and 'Name' in df.columns:
+            if not AIdata_ALL.empty:
+                AIdata_ALL = pd.merge(AIdata_ALL, df, on="Name", how="outer")
+            else:
+                AIdata_ALL = df.copy() # If base was empty, start with the first valid df
 
     return AIdata_ALL
+
 
 def get_ai_response(prompt, data_for_ai_tuple):
     """
     Handles a general Q&A interaction with the Google Generative AI model.
-    It takes a user prompt, prepares the full dataset, and returns the AI's response text.
     """
     if not GOOGLE_API_KEY:
-        st.error("AI analysis cannot proceed. Google API Key is missing.")
-        return "ข้อผิดพลาด: ไม่พบ Google API Key"
+        return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
 
     try:
         if 'model' not in st.session_state:
             st.session_state.model = genai.GenerativeModel('gemini-1.5-flash')
 
-        # Prepare the full datasource for the AI to use as context
         processed_data = prepare_ai_datasource(data_for_ai_tuple)
         
-        # Filter out rows that are mostly empty, as they are not useful for analysis
-        context_df = processed_data.dropna(subset=['market', 'sector'])
-        csv_string = context_df.to_csv(index=False)
+        if processed_data.empty:
+            return "ไม่พบข้อมูลสำหรับวิเคราะห์ กรุณาตรวจสอบว่าข้อมูลถูกโหลดและประมวลผลอย่างถูกต้องในแต่ละ Tab"
 
-        # --- Exponential Backoff Logic ---
+        csv_string = processed_data.to_csv(index=False)
+
         max_retries = 5
-        base_delay = 5  # seconds
+        base_delay = 5
         for attempt in range(max_retries):
             try:
-                with st.spinner(f"AI กำลังประมวลผลคำตอบ... (ครั้งที่ {attempt + 1}/{max_retries})"):
-                    # The prompt now includes the user's question and the data context
+                with st.spinner(f"AI กำลังประมวลผล... (ครั้งที่ {attempt + 1}/{max_retries})"):
                     response = st.session_state.model.generate_content([prompt, csv_string])
                     return response.text
-
             except Exception as e:
                 if "429" in str(e) and attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
@@ -120,3 +140,4 @@ def get_ai_response(prompt, data_for_ai_tuple):
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการเตรียมข้อมูลสำหรับ AI: {e}")
         return f"ขออภัย, เกิดข้อผิดพลาดในการเตรียมข้อมูล: {e}"
+
