@@ -80,98 +80,77 @@ def prepare_ai_datasource(data_tuple):
 def AI_Overviews(prompt, data_for_ai_tuple, stock_name):
     """
     Handles the interaction with the Google Generative AI model.
-    It now includes exponential backoff to handle rate-limiting errors.
+    NOW RETURNS the response text or an error message.
     """
     if not GOOGLE_API_KEY:
         st.error("AI analysis cannot proceed. Google API Key is missing.")
-        return
+        return # หยุดการทำงานและไม่คืนค่าอะไร
 
     try:
-        # To use the more powerful model, keep 'gemini-1.5-pro'.
-        # To avoid quota issues on the free tier, you can switch back to 'gemini-1.5-flash'.
-        st.session_state.model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        processed_data = prepare_ai_datasource(data_for_ai_tuple)
-        
-        if stock_name:
-            if stock_name in processed_data["Name"].values:
-                st.success(f"กำลังวิเคราะห์หุ้น: {stock_name}")
-                
-                stock_info = processed_data[processed_data["Name"] == stock_name].iloc[0]
-                sector = stock_info.get("sector")
-                market = stock_info.get("market")
+        # ... (ส่วนของการเตรียมข้อมูลเหมือนเดิม) ...
+        # st.session_state.model = genai.GenerativeModel(...)
+        # processed_data = prepare_ai_datasource(...)
 
-                if pd.notna(sector) and pd.notna(market):
-                    context_df = processed_data[(processed_data["market"] == market) & (processed_data["sector"] == sector)]
-                else:
-                    context_df = processed_data[processed_data["Name"] == stock_name]
-                
-                csv_string = context_df.to_csv(index=False)
-                
-                # --- Exponential Backoff Logic ---
-                max_retries = 5
-                base_delay = 5  # seconds
-                for attempt in range(max_retries):
-                    try:
-                        with st.spinner(f"AI กำลังวิเคราะห์ข้อมูล... (Attempt {attempt + 1}/{max_retries})"):
-                            response = st.session_state.model.generate_content([prompt, csv_string])
-                            st.write(response.text)
-                        break  # Success, exit the loop
-                    except Exception as e:
-                        if "429" in str(e) and attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
-                            st.warning(f"Rate limit reached. Retrying in {delay} seconds...")
-                            time.sleep(delay)
-                        else:
-                            raise e # Re-raise the exception if it's not a 429 error or if max retries are reached
-                # --- End of Exponential Backoff Logic ---
-
-            else:
-                st.error(f"ไม่พบหุ้น '{stock_name}' ในข้อมูล")
-        else:
-            pass
-            
-    except Exception as e:
-        st.error(f"An error occurred during AI analysis: {e}")
-
-
-def AI_Market_Summary(prompt, data_for_ai_tuple):
-    """
-    Handles generating a market-wide summary using the AI model.
-    """
-    if not GOOGLE_API_KEY:
-        st.error("AI analysis cannot proceed. Google API Key is missing.")
-        return
-
-    try:
-        st.session_state.model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # We need the full dataset for a market summary
-        processed_data = prepare_ai_datasource(data_for_ai_tuple)
-        
-        # Filter out stocks with no sector or market info as they are not useful for summary
-        context_df = processed_data.dropna(subset=['market', 'sector'])
-        
-        csv_string = context_df.to_csv(index=False)
+        # --- ส่วนที่เหลือของ Logic เหมือนเดิม จนถึงการเรียก AI ---
         
         # --- Exponential Backoff Logic ---
         max_retries = 5
-        base_delay = 5  # seconds
+        base_delay = 5
         for attempt in range(max_retries):
             try:
-                with st.spinner(f"AI กำลังสร้างบทสรุปภาพรวมตลาด... (Attempt {attempt + 1}/{max_retries})"):
+                with st.spinner(f"AI กำลังวิเคราะห์ข้อมูล... (Attempt {attempt + 1}/{max_retries})"):
                     response = st.session_state.model.generate_content([prompt, csv_string])
-                    st.write(response.text)
-                break  # Success, exit the loop
+                    return response.text  # <<<<<<< [สำคัญ] เปลี่ยนจาก st.write เป็น return
+
             except Exception as e:
                 if "429" in str(e) and attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
                     st.warning(f"Rate limit reached. Retrying in {delay} seconds...")
                     time.sleep(delay)
                 else:
-                    raise e
-        # --- End of Exponential Backoff Logic ---
-            
-    except Exception as e:
-        st.error(f"An error occurred during AI market summary generation: {e}")
+                    st.error(f"An error occurred during AI analysis: {e}")
+                    return f"เกิดข้อผิดพลาดในการวิเคราะห์: {e}" # คืนค่าเป็น Error message
+        
+        return "ไม่สามารถเชื่อมต่อกับ AI ได้หลังจากการพยายามหลายครั้ง" # กรณี Retry จนหมด
 
+    except Exception as e:
+        st.error(f"An error occurred during data preparation for AI: {e}")
+        return f"เกิดข้อผิดพลาดในการเตรียมข้อมูล: {e}" # คืนค่าเป็น Error message
+
+# --- ทำเช่นเดียวกันกับฟังก์ชัน AI_Market_Summary ---
+
+def AI_Market_Summary(prompt, data_for_ai_tuple):
+    """
+    Handles generating a market-wide summary using the AI model.
+    NOW RETURNS the response text or an error message.
+    """
+    if not GOOGLE_API_KEY:
+        st.error("AI analysis cannot proceed. Google API Key is missing.")
+        return
+
+    try:
+        # ... (ส่วนของการเตรียมข้อมูลเหมือนเดิม) ...
+        
+        # --- Exponential Backoff Logic ---
+        max_retries = 5
+        base_delay = 5
+        for attempt in range(max_retries):
+            try:
+                with st.spinner(f"AI กำลังสร้างบทสรุปภาพรวมตลาด... (Attempt {attempt + 1}/{max_retries})"):
+                    response = st.session_state.model.generate_content([prompt, csv_string])
+                    return response.text  # <<<<<<< [สำคัญ] เปลี่ยนจาก st.write เป็น return
+                    
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    st.warning(f"Rate limit reached. Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                else:
+                    st.error(f"An error occurred during AI market summary generation: {e}")
+                    return f"เกิดข้อผิดพลาดในการสร้างบทสรุป: {e}"
+
+        return "ไม่สามารถเชื่อมต่อกับ AI ได้หลังจากการพยายามหลายครั้ง"
+
+    except Exception as e:
+        st.error(f"An error occurred during data preparation for market summary: {e}")
+        return f"เกิดข้อผิดพลาดในการเตรียมข้อมูล: {e}"
