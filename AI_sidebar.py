@@ -21,17 +21,15 @@ else:
 def prepare_ai_datasource(data_tuple):
     """
     Prepares and merges all necessary data sources into a single DataFrame for AI analysis.
-    This is the original, working version of the data preparation function.
+    This version fixes the KeyError for 'market' and 'sector' by properly handling merge suffixes.
     """
-    # Clean all dataframes in the tuple by removing 'Unnamed' columns which can cause merge errors
+    # Clean all dataframes in the tuple
     cleaned_tuple = []
     for df in data_tuple:
         if isinstance(df, pd.DataFrame):
-            # Find and drop any columns that start with 'Unnamed:'
             unnamed_cols = [col for col in df.columns if str(col).startswith('Unnamed:')]
             cleaned_tuple.append(df.drop(columns=unnamed_cols) if unnamed_cols else df)
         else:
-            # Keep non-DataFrame elements as they are
             cleaned_tuple.append(df)
 
     # Unpack the cleaned dataframes
@@ -45,15 +43,12 @@ def prepare_ai_datasource(data_tuple):
     VP_change_M_data = VP_change_M_data.rename(columns={"Symbols": "Name"}).drop("MarketCap", axis=1, errors='ignore')
     VP_change_3M_data = VP_change_3M_data.rename(columns={"Symbols": "Name"}).drop("MarketCap", axis=1, errors='ignore')
     
-    # Ensure index is reset before merging if it's not already a column
-    if isinstance(SET_Stacked_bar.index, pd.RangeIndex):
-        SET_Stacked_bar = SET_Stacked_bar.reset_index(names="Name")
-    if isinstance(mai_Stacked_bar.index, pd.RangeIndex):
-        mai_Stacked_bar = mai_Stacked_bar.reset_index(names="Name")
+    if not SET_Stacked_bar.empty: SET_Stacked_bar = SET_Stacked_bar.reset_index(names="Name")
+    if not mai_Stacked_bar.empty: mai_Stacked_bar = mai_Stacked_bar.reset_index(names="Name")
 
 
     # Combine and simplify data sources
-    AIdata_52WHL = pd.concat([source_52SET, source_52mai])
+    AIdata_52WHL = pd.concat([source_52SET, source_52mai], ignore_index=True)
     
     perf_list = []
     if not perf_source_SET.empty and perf_source_SET.shape[1] > 1: perf_list.append(perf_source_SET.iloc[:, [0, -1]])
@@ -71,16 +66,28 @@ def prepare_ai_datasource(data_tuple):
         AIdata_Stacked_Volume = pd.concat(stack_vol_list, ignore_index=True)
         AIdata_Stacked_Volume.columns = ["Name", "Volume Trade Ratio in Its Sector"]
 
-    # Merge all data into a single DataFrame
-    AIdata_ALL = rs_score_data.merge(AIdata_52WHL, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(VP_change_D_data, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(VP_change_W_data, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(VP_change_M_data, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(VP_change_3M_data, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(AIdata_Performance, how="outer", on="Name")
-    AIdata_ALL = AIdata_ALL.merge(AIdata_Stacked_Volume, how="outer", on="Name")
-    
-    # Clean up potential duplicate columns from merges
+    # --- [FIXED] Merge all data into a single DataFrame ---
+    # Step 1: Merge the two dataframes that contain market/sector info, creating suffixed columns
+    AIdata_ALL = rs_score_data.merge(AIdata_52WHL, how="outer", on="Name", suffixes=('_rs', '_52'))
+
+    # Step 2: Coalesce the suffixed columns back into single 'market' and 'sector' columns
+    for col in ['market', 'sector', 'sub-sector']:
+        col_rs = f'{col}_rs'
+        col_52 = f'{col}_52'
+        if col_rs in AIdata_ALL.columns and col_52 in AIdata_ALL.columns:
+            AIdata_ALL[col] = AIdata_ALL[col_rs].fillna(AIdata_ALL[col_52])
+            AIdata_ALL = AIdata_ALL.drop(columns=[col_rs, col_52])
+
+    # Step 3: Merge the rest of the dataframes which do not contain market/sector info
+    dfs_to_merge = [
+        VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
+        AIdata_Performance, AIdata_Stacked_Volume
+    ]
+    for df in dfs_to_merge:
+        if not df.empty and 'Name' in df.columns:
+             AIdata_ALL = AIdata_ALL.merge(df, how="outer", on="Name")
+
+    # Final clean up of any duplicates
     AIdata_ALL = AIdata_ALL.loc[:,~AIdata_ALL.columns.duplicated()]
 
     return AIdata_ALL
@@ -88,8 +95,7 @@ def prepare_ai_datasource(data_tuple):
 
 def get_ai_response(prompt, data_for_ai_tuple, stock_name=None):
     """
-    Handles a general Q&A interaction with the Google Generative AI model,
-    combining the logic for both market summary and single stock analysis.
+    Handles a general Q&A interaction with the Google Generative AI model.
     """
     if not GOOGLE_API_KEY:
         return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
@@ -108,18 +114,13 @@ def get_ai_response(prompt, data_for_ai_tuple, stock_name=None):
 
         if stock_name:  # Logic for single stock analysis
             if stock_name in processed_data["Name"].values:
-                stock_info_rows = processed_data[processed_data["Name"] == stock_name]
-                if not stock_info_rows.empty:
-                    stock_info = stock_info_rows.iloc[0]
-                    sector = stock_info.get("sector")
-                    market = stock_info.get("market")
-
-                    if pd.notna(sector) and pd.notna(market):
-                        context_df = processed_data[(processed_data["market"] == market) & (processed_data["sector"] == sector)]
-                    else:
-                        context_df = processed_data[processed_data["Name"] == stock_name]
-                else: # Should not happen if stock_name is in values, but as a safeguard
-                     return f"ไม่พบข้อมูลหุ้น '{stock_name}'"
+                stock_info = processed_data[processed_data["Name"] == stock_name].iloc[0]
+                sector = stock_info.get("sector")
+                market = stock_info.get("market")
+                if pd.notna(sector) and pd.notna(market):
+                    context_df = processed_data[(processed_data["market"] == market) & (processed_data["sector"] == sector)]
+                else:
+                    context_df = processed_data[processed_data["Name"] == stock_name]
             else:
                 return f"ไม่พบหุ้น '{stock_name}' ในฐานข้อมูล"
         else:  # Logic for general market analysis
