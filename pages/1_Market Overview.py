@@ -100,7 +100,7 @@ with tab1:
             show_name = st.checkbox("🎉 Show Name", key="show_name_tab1")
 
     @st.cache_data
-    def VP_change(interval = "D", show_name = False, selection_list = None):
+    def VP_change(interval, show_name, selection_list):
         period = {"D": 1, "W": 5, "M": 22, "3M": 65}.get(interval, 1)
         select_df = dv[selection_list]
         check = select_df.iloc[-1].dropna().index.tolist()
@@ -127,7 +127,7 @@ with tab1:
         return VP_chart, data_source
 
     @st.cache_data
-    def RS_Score(selection_list=None):
+    def RS_Score(selection_list):
         data = dp.copy().ffill().bfill()
         Q1 = data.pct_change(65).iloc[-1]
         Q2 = data.pct_change(130).iloc[-1]
@@ -190,9 +190,8 @@ with tab2:
         data = data[data["sector"] == select_sector]
         if select_sub is not None:
             data = data[data["sub-sector"] == select_sub]
-        # (Full plot_geo function code from original)
         geo_fig = px.line(data, x = "Date", y = "Return", color = "Name",
-                          title = f"Performance: Sector:<br> &nbsp;Sector: <i>{select_sector}<i> <br> &nbsp;Sub-Sector: <i>{select_sub}</i>",
+                          title = f"Performance: Sector:<br> &nbsp;Sector: <i>{select_sector}<i> <br> &nbsp;Sub-Sector: <i>{select_sub or 'ALL'}</i>",
                           labels= {"Date": "", "Return" : "Cumulative Return"}, template = "seaborn")
         return geo_fig
 
@@ -220,10 +219,21 @@ with tab2:
         data = data[data["sector"] == select_sector]
         if select_sub is not None:
             data = data[data["sub-sector"] == select_sub]
-        # (Full plot_52WHL function code from original)
-        fig_52WHL = px.scatter(data, x = "ROC_10", y = "52WHL", color = "Name",
-                               title = f"52 Weeks High Low vs Rate of Change 10:<br> &nbsp;Sector: <i>{select_sector}<i> <br> &nbsp;Sub-Sector: <i>{select_sub}</i>",
+        fig_52WHL = px.scatter(data, x = "ROC_10", y = "52WHL", color = "Name", size="MarketCap",
+                               text="Name",
+                               custom_data=["Name", "ROC_10", "52WHL", "sector", "sub-sector", "MarketCap", 'Close'],
+                               title = f"52 Weeks High Low vs Rate of Change 10:<br> &nbsp;Sector: <i>{select_sector}<i> <br> &nbsp;Sub-Sector: <i>{select_sub or 'ALL'}</i>",
                                template = "seaborn")
+        
+        # FIX 2: Add red lines back
+        fig_52WHL.add_vline(x=0, line_color='red', line_width=2, opacity=0.6)
+        fig_52WHL.add_hline(y=0, line_color='red', line_width=2, opacity=0.6)
+        fig_52WHL.add_hline(y=1, line_color='red', line_width=2, opacity=0.6)
+
+        fig_52WHL.update_traces(
+            hovertemplate="<b>Name:</b> %{customdata[0]}<br><b>Close:</b> %{customdata[6]:,.2f} <br><b>ROC_10:</b> %{customdata[1]:,.2f}% <br><b>52WHL:</b> %{customdata[2]:,.2f} <br><b>sector:</b> %{customdata[3]} <br><b>sub-sector:</b> %{customdata[4]} <br><b>MarketCap:</b> %{customdata[5]:,.0f} THB <br>",
+            textposition = "bottom center"
+        )
         return fig_52WHL
 
     SET_t2,mai_t2 = geo_calculation(start)
@@ -254,14 +264,121 @@ with tab2:
         st.subheader("mai 52 Weeks High-Low vs Rate of Change 10 Days")
         st.plotly_chart(plot_52WHL(_52mai, maiSectorSeclect_1_tab2, None))
 
-#"""===================================TAB 3==================================="""
+#"""===================================TAB 3 (RESTORED) ==================================="""
 with tab3:
-    # Full tab 3 code is restored here
-    # ... (code for Volume_Analysis_iteration_by_Sector, Volume_Analysis_iteration_by_Stock, VWAP, and tab UI layout)
-    st.write("Full Volume Analysis charts would be displayed here.")
-    # For AI, create dummy dataframes for now. In a real scenario, these would be populated by the VWAP function.
-    SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod= pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    tab31, tab32 = st.tabs(["\t\tSET\t\t", "\t\tmai\t\t"])
+
+    def Volume_Analysis_iteration_by_Sector(market, data_volume_in_wide_format, period, fig_width=600, fig_height=1200):
+        temp_market = raw_std[raw_std["market"] == market]
+        sectors_for_subplot = sorted(temp_market["sector"].unique())
+        fig_VA = make_subplots(rows = len(sectors_for_subplot), cols = 1, subplot_titles= sectors_for_subplot)
+        for i,j in enumerate(sectors_for_subplot):
+            temp_sector = temp_market[temp_market["sector"]== j]
+            temp_tickers = sorted(temp_sector["symbol"].unique())
+            temp_mc = mc[mc["Symbols"].isin(temp_tickers)].copy()
+            temp_mc["weight"] = temp_mc["MarketCap"] / temp_mc["MarketCap"].sum()
+            VA = data_volume_in_wide_format.tail(period + 70).copy().fillna(0)
+            VA = VA[temp_tickers].reset_index()
+            VA = pd.melt(VA, id_vars = ["Date"], var_name= "Name", value_name= "Volume")
+            VA = VA.merge(right = temp_mc, left_on= "Name", right_on = "Symbols").drop("Symbols", axis =1)
+            VA["Weighted_Volume"] = VA["Volume"] * VA["weight"]
+            VA = pd.pivot_table(VA, index = "Date", columns = "Name", values = "Weighted_Volume")
+            VA["Sum"] = VA.sum(1)
+            VA["Threshold"] = VA["Sum"].rolling(window = 22).mean() + 2 * VA["Sum"].rolling(window = 22).std()
+            VA["Anomaly"] = VA["Sum"] > VA["Threshold"]
+            VA = VA.reset_index().tail(period)
+            fig_VA.add_trace(go.Bar(x = VA["Date"], y = VA["Sum"], name = j,showlegend= False, marker = dict(color = VA["Anomaly"].map({True: "orange", False:"gray"}))), row= i+1,col=1)
+        fig_VA.update_layout(width = fig_width, height = fig_height, title = f"{market} Sector Volume Analysis Period: {period} Days", template="seaborn")
+        return fig_VA
+
+    def Volume_Analysis_iteration_by_Stock(market, sector, data_volume_in_wide_format, period, page, fig_width=600, fig_height=1200):
+        temp_market = raw_std[raw_std["market"] == market]
+        temp_sector = temp_market[temp_market["sector"] == sector]
+        symbols_for_subplot = sorted(temp_sector["symbol"].unique())[10*(page - 1) :page * 10]
+        if not symbols_for_subplot:
+            st.warning("ไม่มีหุ้นให้แสดงในหน้านี้")
+            return go.Figure()
+        fig_symbols = make_subplots(rows = len(symbols_for_subplot), cols = 1, subplot_titles= symbols_for_subplot)
+        for i,j in enumerate(symbols_for_subplot):
+            Vol_df = data_volume_in_wide_format[symbols_for_subplot].tail( period + 70 ).copy().fillna(0)
+            Vol_threshold = Vol_df.rolling(window = 22).mean() + 2 * Vol_df.rolling(window = 22).std()
+            Vol_anomaly = Vol_df > Vol_threshold
+            cutoff_for_plot = pd.DataFrame({
+                "Date": Vol_df.index,
+                "Volume": Vol_df[j],
+                "Anomaly": Vol_anomaly[j]
+            }).dropna().tail(period)
+            fig_symbols.add_trace(go.Bar(x = cutoff_for_plot["Date"], y = cutoff_for_plot["Volume"], name = j, showlegend= False, marker = dict(color = cutoff_for_plot["Anomaly"].map({True: "orange", False:"gray"}))), row= i+1, col=1)
+        fig_symbols.update_layout(width = fig_width, height = fig_height, title = f"{market} Sector: {sector} Volume Analysis Period: {period} Days ", template="seaborn")
+        return fig_symbols
+
+    def VWAP(market, sector, period, options:str = None):
+        temp_market = raw_std[raw_std["market"] == market]
+        temp_sector = temp_market[temp_market["sector"] == sector] if sector is not None else temp_market
+        symbols_for_subplot = sorted(temp_sector["symbol"].unique())
+        if not symbols_for_subplot:
+            return go.Figure(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        price = dp[symbols_for_subplot].tail(period*2).copy().ffill().bfill()
+        vol = dv[symbols_for_subplot].tail(period*2).copy().ffill().bfill()
+        df_VWAP = (price * vol).cumsum() / vol.cumsum()
+        df_VWAP_data = df_VWAP.T.reset_index().rename(columns = {"index": "Name"})
+        VWAP_cumprod = (df_VWAP.pct_change()+1).cumprod()
+        VWAP_cumprod_data = VWAP_cumprod.T.reset_index().rename(columns = {"index": "Name"})
+        df_stacked_bar = (vol * df_VWAP)
+        df_stacked_bar["sum"] = df_stacked_bar.sum(1)
+        df_stacked_bar_ratio = df_stacked_bar.iloc[:, :-1].div(df_stacked_bar["sum"], axis = 0).reset_index()
+        stacked_bar_ratio_datasource = df_stacked_bar_ratio.set_index("Date").T
+        fig = make_subplots(rows = 2, cols = 1, subplot_titles= ["VWAP Cumulative Product", "Stacked Volume Ratio"], shared_xaxes=True)
+        for column in VWAP_cumprod.columns:
+            fig.add_trace(go.Scatter(x=VWAP_cumprod.index, y=VWAP_cumprod[column], mode="lines", name=column, legendgroup='1'), row=1, col=1)
+            fig.add_trace(go.Bar(x=df_stacked_bar_ratio["Date"], y=df_stacked_bar_ratio[column], name=column, legendgroup='2', showlegend=False), row=2, col=1)
+        fig.update_layout(title_text=f"VWAP Analysis: {market} - {sector}", template="seaborn", height=800, barmode="stack")
+        return fig, stacked_bar_ratio_datasource, df_VWAP_data, VWAP_cumprod_data
+
+    with tab31:
+        t31c1, t31c2, t31c3 = st.columns([2,3,2])
+        with t31c1:
+            st.subheader("SET Sector Volume")
+            p_set_sec = st.radio("Period", [30,60,90], key="p_set_sec", horizontal=True)
+            st.plotly_chart(Volume_Analysis_iteration_by_Sector("SET", dv, p_set_sec, fig_height=900), use_container_width=True)
+        with t31c2:
+            st.subheader("SET VWAP Analysis")
+            s_set_vwap = st.radio("Select Sector", sorted(raw_std[raw_std["market"] == "SET"]['sector'].unique()), key="s_set_vwap", horizontal=True)
+            p_set_vwap = st.radio("Period", [30,60,90], key="p_set_vwap", horizontal=True)
+            fig_set, set_stack, set_vwap, set_cumprod = VWAP("SET", s_set_vwap, p_set_vwap)
+            st.plotly_chart(fig_set, use_container_width=True)
+        with t31c3:
+            st.subheader("SET Stock Volume")
+            s_set_stk = st.radio("Select Sector", sorted(raw_std[raw_std["market"] == "SET"]['sector'].unique()), key="s_set_stk", horizontal=True)
+            p_set_stk = st.radio("Period", [30,60,90], key="p_set_stk", horizontal=True)
+            page_max_set = (len(raw_std[(raw_std["market"] == "SET") & (raw_std["sector"] == s_set_stk)]) // 10) + 1
+            pg_set_stk = st.radio("Page", range(1, page_max_set + 1), key="pg_set_stk", horizontal=True)
+            st.plotly_chart(Volume_Analysis_iteration_by_Stock("SET", s_set_stk, dv, p_set_stk, pg_set_stk, fig_height=900), use_container_width=True)
+
+    with tab32:
+        t32c1, t32c2, t32c3 = st.columns([2,3,2])
+        with t32c1:
+            st.subheader("mai Sector Volume")
+            p_mai_sec = st.radio("Period", [30,60,90], key="p_mai_sec", horizontal=True)
+            st.plotly_chart(Volume_Analysis_iteration_by_Sector("mai", dv, p_mai_sec, fig_height=900), use_container_width=True)
+        with t32c2:
+            st.subheader("mai VWAP Analysis")
+            s_mai_vwap = st.radio("Select Sector", sorted(raw_std[raw_std["market"] == "mai"]['sector'].unique()), key="s_mai_vwap", horizontal=True)
+            p_mai_vwap = st.radio("Period", [30,60,90], key="p_mai_vwap", horizontal=True)
+            fig_mai, mai_stack, mai_vwap, mai_cumprod = VWAP("mai", s_mai_vwap, p_mai_vwap)
+            st.plotly_chart(fig_mai, use_container_width=True)
+        with t32c3:
+            st.subheader("mai Stock Volume")
+            s_mai_stk = st.radio("Select Sector", sorted(raw_std[raw_std["market"] == "mai"]['sector'].unique()), key="s_mai_stk", horizontal=True)
+            p_mai_stk = st.radio("Period", [30,60,90], key="p_mai_stk", horizontal=True)
+            page_max_mai = (len(raw_std[(raw_std["market"] == "mai") & (raw_std["sector"] == s_mai_stk)]) // 10) + 1
+            pg_mai_stk = st.radio("Page", range(1, page_max_mai + 1), key="pg_mai_stk", horizontal=True)
+            st.plotly_chart(Volume_Analysis_iteration_by_Stock("mai", s_mai_stk, dv, p_mai_stk, pg_mai_stk, fig_height=900), use_container_width=True)
+    
+    # For AI data gathering
+    _, SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod = VWAP(market = "SET", sector = None, period=90, options= "datasource")
+    _, mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod= VWAP(market = "mai", sector = None, period=90, options= "datasource")
+
 
 #"""===================================TAB 4==================================="""
 with tab4:
@@ -274,22 +391,23 @@ with tab4:
             hm_df["Return"] = hm_df.pct_change()
             hm_df = hm_df.dropna().reset_index()
             hm_df["Y"] = hm_df.Date.dt.strftime("%Y")
-            hm_df["M"] = hm_df.Date.dt.strftime("%b") # Use month abbreviation
+            hm_df["M"] = hm_df.Date.dt.month
             pivoted_hm_df = pd.pivot_table(hm_df, index = "Y", columns = "M", values = "Return")
+            pivoted_hm_df.columns = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
             
-            # (Heatmap plotting logic here)
-            fig, ax = plt.subplots(figsize=(8, 6))
-            sns.heatmap(pivoted_hm_df, cmap="RdYlGn", annot=True, fmt=".2%", ax=ax, center=0)
+            fig, ax = plt.subplots(figsize=(10, 8))
+            # FIX 4: Change font size with annot_kws
+            sns.heatmap(pivoted_hm_df, cmap="RdYlGn", annot=True, fmt=".2%", ax=ax, center=0, annot_kws={"size": 8})
             plt.title(f"Historical Monthly Return Heatmap of {hm_name}")
+            plt.ylabel("Year")
+            plt.xlabel("Month")
             st.pyplot(fig)
         else:
             if hm_name: st.error(f"Stock '{hm_name}' not found.")
 
 #"""===================================AI SECTION==================================="""
-st.divider()
-st.header("🤖 AI Q&A Section")
-st.markdown("ถามคำถามเกี่ยวกับภาพรวมตลาดหรือหุ้นรายตัวจากข้อมูลที่แอปพลิเคชันวิเคราะห์")
-ai_response_placeholder = st.container()
+# The main app area no longer needs a placeholder
+# with st.sidebar: is now the single place for AI interaction
 
 # Sidebar is processed last to ensure all dataframes are created
 with st.sidebar:
@@ -322,10 +440,9 @@ with st.sidebar:
                 4.  If data required is missing, explicitly state that it's unavailable.
             """
             response_text = get_ai_response(generic_prompt, data_for_ai_tuple)
-
-            with ai_response_placeholder:
-                ai_response_placeholder.empty()
-                st.markdown("### 🤖 คำตอบจาก AI")
-                st.markdown("---")
-                st.markdown(response_text)
+            
+            # FIX 1: Display response inside the sidebar
+            st.markdown("---")
+            st.markdown("### 🤖 คำตอบจาก AI")
+            st.markdown(response_text)
 
