@@ -22,6 +22,7 @@ def prepare_ai_datasource(data_tuple):
     """
     Prepares and merges all necessary data sources into a single DataFrame for AI analysis.
     This function is cached and is robust against empty or malformed dataframes.
+    It now selectively merges columns to prevent duplication errors.
     """
     (rs_score_data, VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
      source_52SET, source_52mai, perf_source_SET, perf_source_mai,
@@ -37,22 +38,29 @@ def prepare_ai_datasource(data_tuple):
     # 52 Week High/Low data
     source_52whl = pd.concat([source_52SET, source_52mai], ignore_index=True)
     if not source_52whl.empty and 'Name' in source_52whl.columns:
-        # Select essential columns to avoid large merges
-        cols_52whl = ['Name', 'market', 'sector', 'sub-sector', 'High', 'Low', 'Close', '52WHL', 'ROC_10']
-        valid_cols = [col for col in cols_52whl if col in source_52whl.columns]
+        # Select only the new, essential columns to merge, excluding potential duplicates like market/sector
+        cols_to_merge_52whl = ['Name', 'High', 'Low', 'Close', '52WHL', 'ROC_10']
+        valid_cols = [col for col in cols_to_merge_52whl if col in source_52whl.columns]
+        
         if not master_df.empty:
-            master_df = pd.merge(master_df, source_52whl[valid_cols].drop_duplicates(subset=['Name']), on="Name", how="outer", suffixes=('', '_y'))
+            # Merge only new info, using outer join to keep all names
+            master_df = pd.merge(master_df, source_52whl[valid_cols].drop_duplicates(subset=['Name']), on="Name", how="outer")
         else:
+            # If master is empty, start with this data
             master_df = source_52whl[valid_cols].drop_duplicates(subset=['Name'])
 
-    # VP Change data
+    # VP Change data - Selectively merge only the change columns
     for df, interval in [(VP_change_D_data, "D"), (VP_change_W_data, "W"), (VP_change_M_data, "M"), (VP_change_3M_data, "3M")]:
         if not df.empty and 'Symbols' in df.columns:
             df_renamed = df.rename(columns={"Symbols": "Name"})
+            # Define the specific columns to merge for this interval
+            vp_cols_to_merge = ['Name', f'Price %Change {interval}', f'Volume %Change {interval}']
+            valid_vp_cols = [col for col in vp_cols_to_merge if col in df_renamed.columns]
+            
             if not master_df.empty:
-                master_df = pd.merge(master_df, df_renamed.drop_duplicates(subset=['Name']), on="Name", how="outer")
+                master_df = pd.merge(master_df, df_renamed[valid_vp_cols].drop_duplicates(subset=['Name']), on="Name", how="outer")
             else:
-                 master_df = df_renamed.drop_duplicates(subset=['Name'])
+                 master_df = df_renamed[valid_vp_cols].drop_duplicates(subset=['Name'])
 
     # Performance data
     perf_list = []
@@ -66,7 +74,8 @@ def prepare_ai_datasource(data_tuple):
         else:
             master_df = df_perf.drop_duplicates(subset=['Name'])
             
-    # Clean up any merge-generated duplicate columns
+    # Clean up any merge-generated duplicate columns just in case
+    master_df = master_df.loc[:, ~master_df.columns.str.endswith('_x')]
     master_df = master_df.loc[:, ~master_df.columns.str.endswith('_y')]
     
     return master_df
