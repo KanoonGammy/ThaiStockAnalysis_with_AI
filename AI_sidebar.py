@@ -87,7 +87,7 @@ def get_ai_response(prompt, data_for_ai_tuple):
     try:
         # --- [สำคัญ] แก้ไขชื่อโมเดลตรงนี้ ---
         if 'model' not in st.session_state:
-            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash')
 
         processed_data = prepare_ai_datasource(data_for_ai_tuple)
         
@@ -117,4 +117,5 @@ def get_ai_response(prompt, data_for_ai_tuple):
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการเตรียมข้อมูลสำหรับ AI: {e}")
         return f"ขออภัย, เกิดข้อผิดพลาดในการเตรียมข้อมูล: {e}"
+
 
