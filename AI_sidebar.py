@@ -101,9 +101,9 @@ def get_ai_response(prompt, data_for_ai_tuple, stock_name=None):
         return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
 
     try:
-        # Use the model name from the working version
+        # --- [DEFINITIVE FIX] Use the official latest model name ---
         if 'model' not in st.session_state:
-            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash')
+            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
         processed_data = prepare_ai_datasource(data_for_ai_tuple)
         
