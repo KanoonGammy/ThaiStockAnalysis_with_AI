@@ -1,21 +1,23 @@
 # import necessary libraries
 import streamlit as st
-import openai # Import OpenAI library
+import google.generativeai as genai # Import Google's library
 import pandas as pd
 import os
 import time
 
-# --- [MODIFIED] Load OpenAI API Key from Streamlit Secrets ---
+# --- [MODIFIED] Load Google API Key from Streamlit Secrets ---
 try:
-    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 except KeyError:
-    OPENAI_API_KEY = None
-    st.warning("`OPENAI_API_KEY` not found in Streamlit Secrets. Please add it for the AI features to work.")
+    GOOGLE_API_KEY = None
+    st.warning("`GOOGLE_API_KEY` not found in Streamlit Secrets. Please add it for the AI features to work.")
 
-# Display a warning if the key is missing
-if not OPENAI_API_KEY:
-    st.warning("AI features are disabled because the OpenAI API Key is not configured in Streamlit Secrets.")
-
+# Configure the generative AI model with the API key
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
+else:
+    # This warning will now appear if the secret is missing
+    st.warning("AI features are disabled because the Google API Key is not configured in Streamlit Secrets.")
 
 @st.cache_data
 def prepare_ai_datasource(data_tuple):
@@ -89,14 +91,15 @@ def prepare_ai_datasource(data_tuple):
 
 def get_ai_response(prompt, market_filter="All", sector_filter="All", sub_sector_filter="All"):
     """
-    Handles a general Q&A interaction with the OpenAI API (using gpt-3.5-turbo).
+    Handles a general Q&A interaction with the Google Gemini API (Free Tier).
     """
-    if not OPENAI_API_KEY:
-        return "ข้อผิดพลาด: ไม่พบ OpenAI API Key กรุณาตั้งค่าใน Streamlit Secrets"
+    if not GOOGLE_API_KEY:
+        return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าใน Streamlit Secrets"
 
     try:
-        # --- Initialize OpenAI client ---
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        # --- Use the stable 'gemini-pro' model ---
+        if 'model' not in st.session_state:
+            st.session_state.model = genai.GenerativeModel('gemini-pro')
 
         processed_data = st.session_state.get('ai_datasource')
         if processed_data is None or processed_data.empty:
@@ -115,10 +118,13 @@ def get_ai_response(prompt, market_filter="All", sector_filter="All", sub_sector
             return "ไม่พบข้อมูลหุ้นตามเงื่อนไขที่คุณเลือก"
 
         csv_string = context_df.to_csv(index=False)
-        
-        # Combine the instruction and the data for the user message
-        full_user_prompt = f"""
-        Here is the user's request:
+
+        # --- API call to Google Gemini ---
+        # The prompt now includes a system-like instruction at the beginning
+        full_prompt_text = f"""
+        System Instruction: You are an expert AI technical analyst for the stock market. Your entire analysis must be based *only* on the provided CSV data.
+
+        User's Request:
         ---
         {prompt}
         ---
@@ -128,16 +134,10 @@ def get_ai_response(prompt, market_filter="All", sector_filter="All", sub_sector
         {csv_string}
         ---
         """
-
-        with st.spinner("OpenAI (Free Tier) กำลังวิเคราะห์..."):
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo", # Cost-effective model
-                messages=[
-                    {"role": "system", "content": "You are an expert AI technical analyst for the stock market. Your entire analysis must be based *only* on the provided CSV data."},
-                    {"role": "user", "content": full_user_prompt}
-                ]
-            )
-            return response.choices[0].message.content
+        
+        with st.spinner("Gemini (Free) กำลังวิเคราะห์..."):
+            response = st.session_state.model.generate_content(full_prompt_text)
+            return response.text
 
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดระหว่างการวิเคราะห์ของ AI: {e}")
