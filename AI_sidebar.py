@@ -66,11 +66,10 @@ def prepare_ai_datasource(data_tuple):
         AIdata_Stacked_Volume = pd.concat(stack_vol_list, ignore_index=True)
         AIdata_Stacked_Volume.columns = ["Name", "Volume Trade Ratio in Its Sector"]
 
-    # --- [FIXED] Merge all data into a single DataFrame ---
-    # Step 1: Merge the two dataframes that contain market/sector info, creating suffixed columns
+    # Merge all data into a single DataFrame
     AIdata_ALL = rs_score_data.merge(AIdata_52WHL, how="outer", on="Name", suffixes=('_rs', '_52'))
 
-    # Step 2: Coalesce the suffixed columns back into single 'market' and 'sector' columns
+    # Coalesce the suffixed columns
     for col in ['market', 'sector', 'sub-sector']:
         col_rs = f'{col}_rs'
         col_52 = f'{col}_52'
@@ -78,7 +77,6 @@ def prepare_ai_datasource(data_tuple):
             AIdata_ALL[col] = AIdata_ALL[col_rs].fillna(AIdata_ALL[col_52])
             AIdata_ALL = AIdata_ALL.drop(columns=[col_rs, col_52])
 
-    # Step 3: Merge the rest of the dataframes which do not contain market/sector info
     dfs_to_merge = [
         VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
         AIdata_Performance, AIdata_Stacked_Volume
@@ -87,7 +85,6 @@ def prepare_ai_datasource(data_tuple):
         if not df.empty and 'Name' in df.columns:
              AIdata_ALL = AIdata_ALL.merge(df, how="outer", on="Name")
 
-    # Final clean up of any duplicates
     AIdata_ALL = AIdata_ALL.loc[:,~AIdata_ALL.columns.duplicated()]
 
     return AIdata_ALL
@@ -95,22 +92,22 @@ def prepare_ai_datasource(data_tuple):
 
 def get_ai_response(prompt, data_for_ai_tuple, market_filter="All", sector_filter="All", sub_sector_filter="All"):
     """
-    Handles a general Q&A interaction with the Google Generative AI model,
-    now with filtering capabilities.
+    Handles a general Q&A interaction with the Google Generative AI model.
     """
     if not GOOGLE_API_KEY:
         return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
 
     try:
+        # --- Changed model name as requested ---
         if 'model' not in st.session_state:
-            st.session_state.model = genai.GenerativeModel(''gemini-1.5-flash'')
+            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash')
 
         processed_data = prepare_ai_datasource(data_for_ai_tuple)
         
         if processed_data.empty:
             return "ไม่พบข้อมูลสำหรับวิเคราะห์"
 
-        # --- [NEW] Filter data based on user selection ---
+        # Filter data based on user selection
         context_df = processed_data.copy()
         if market_filter != "All":
             context_df = context_df[context_df['market'] == market_filter]
@@ -138,12 +135,11 @@ def get_ai_response(prompt, data_for_ai_tuple, market_filter="All", sector_filte
                     time.sleep(delay)
                 else:
                     st.error(f"เกิดข้อผิดพลาดระหว่างการวิเคราะห์ของ AI: {e}")
-                    return f"ขอผิดพลาด, เกิดข้อผิดพลาดในการวิเคราะห์: {e}"
+                    return f"ขออภัย, เกิดข้อผิดพลาดในการวิเคราะห์: {e}"
 
         return "ไม่สามารถเชื่อมต่อกับ AI ได้หลังจากการพยายามหลายครั้ง"
 
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการเตรียมข้อมูลสำหรับ AI: {e}")
         return f"ขออภัย, เกิดข้อผิดพลาดในการเตรียมข้อมูล: {e}"
-
 
