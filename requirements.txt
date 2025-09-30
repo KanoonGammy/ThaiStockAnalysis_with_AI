@@ -8,9 +8,10 @@ openpyxl
 scipy
 pandas-ta
 seaborn
-google.generativeai
+google-generativeai
 python-dotenv
 vectorbt
 openai
+
 
 
