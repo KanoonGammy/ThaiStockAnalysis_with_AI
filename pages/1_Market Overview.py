@@ -99,7 +99,13 @@ with st.spinner("Preparing data for analysis..."):
     def get_vp_change_data(interval):
         period_map = {"D": 1, "W": 5, "M": 22, "3M": 65}
         period = period_map.get(interval, 1)
-        check = dv[selection].iloc[-1].dropna().index.tolist()
+        # Ensure 'selection' is not empty and symbols exist in 'dv'
+        valid_selection = [s for s in selection if s in dv.columns]
+        if not valid_selection:
+            return pd.DataFrame() # Return empty if no valid stocks
+        check = dv[valid_selection].iloc[-1].dropna().index.tolist()
+        if not check:
+            return pd.DataFrame() # Return empty if no data after dropping NA
         pc = dp[check].pct_change(period).iloc[-1]
         pv = dv[check].ewm(span=5, adjust=False).mean().pct_change(period).iloc[-1]
         cb_df = pd.DataFrame({"Symbols": pc.index, f"Price %Change {interval}": pc.values*100, f"Volume %Change {interval}": pv.values*100})
@@ -142,14 +148,19 @@ with st.spinner("Preparing data for analysis..."):
     def get_vwap_data(market, sector=None, period=90):
         temp_market = raw_std[raw_std["market"] == market]
         symbols = sorted(temp_market["symbol"].unique()) if sector is None else sorted(temp_market[temp_market["sector"] == sector]["symbol"].unique())
-        price = dp[symbols].tail(period*2).copy().ffill().bfill()
-        vol = dv[symbols].tail(period*2).copy().ffill().bfill()
+        # Filter symbols that exist in dp and dv to prevent KeyErrors
+        valid_symbols = [s for s in symbols if s in dp.columns and s in dv.columns]
+        if not valid_symbols:
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+        price = dp[valid_symbols].tail(period*2).copy().ffill().bfill()
+        vol = dv[valid_symbols].tail(period*2).copy().ffill().bfill()
         vwap = (price * vol).cumsum() / vol.cumsum()
         vwap_data = vwap.T.reset_index().rename(columns={"index": "Name"})
         vwap_cumprod = (vwap.pct_change()+1).cumprod()
         vwap_cumprod_data = vwap_cumprod.T.reset_index().rename(columns={"index": "Name"})
         
-        df_stack = dv[symbols].tail(period*2).copy().ffill().bfill()
+        df_stack = dv[valid_symbols].tail(period*2).copy().ffill().bfill()
         df_stacked_bar = df_stack * vwap
         df_stacked_bar["sum"] = df_stacked_bar.sum(1)
         df_stacked_bar_ratio = df_stacked_bar.iloc[:, :-1].div(df_stacked_bar["sum"], axis = 0)
@@ -177,6 +188,8 @@ with tab1:
             show_name = st.checkbox("🎉 Show Name")
         
         def plot_vp_change(interval, data):
+            if data.empty:
+                return go.Figure().update_layout(title_text=f"No data available for {interval} VP Change")
             text_interval = "Daily" if interval == "D" else "Weekly" if interval == "W" else "Monthly" if interval == "M" else "Quarterly"
             df_use = data.merge(rawt1, left_on="Symbols", right_on="symbol", how="left")
             df_use = df_use[df_use["Symbols"].isin(selection)]
