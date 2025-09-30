@@ -5,7 +5,7 @@ import pandas as pd
 import os
 import time
 
-# --- [MODIFIED] Load Google API Key from Streamlit Secrets ---
+# --- Load Google API Key from Streamlit Secrets ---
 try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 except KeyError:
@@ -16,7 +16,6 @@ except KeyError:
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
 else:
-    # This warning will now appear if the secret is missing
     st.warning("AI features are disabled because the Google API Key is not configured in Streamlit Secrets.")
 
 @st.cache_data
@@ -97,7 +96,7 @@ def get_ai_response(prompt, market_filter="All", sector_filter="All", sub_sector
         return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าใน Streamlit Secrets"
 
     try:
-        # --- Use the stable 'gemini-pro' model ---
+        # --- [DEFINITIVE FIX] Use the stable 'gemini-pro' model AFTER updating the library ---
         if 'model' not in st.session_state:
             st.session_state.model = genai.GenerativeModel('gemini-pro')
 
@@ -119,7 +118,6 @@ def get_ai_response(prompt, market_filter="All", sector_filter="All", sub_sector
 
         csv_string = context_df.to_csv(index=False)
 
-        # --- API call to Google Gemini ---
         # The prompt now includes a system-like instruction at the beginning
         full_prompt_text = f"""
         System Instruction: You are an expert AI technical analyst for the stock market. Your entire analysis must be based *only* on the provided CSV data.
