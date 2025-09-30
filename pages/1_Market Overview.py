@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import numpy as np
 import seaborn as sns
 from select_market import select_market
-from AI_sidebar import get_ai_response, prepare_ai_datasource # Import both functions
+from AI_sidebar import get_ai_response # Import the updated function
 
 st.set_page_config(layout="wide")
 
@@ -60,26 +60,35 @@ dp,dv,mc = import_data()
 raw_std = pd.read_csv("https://raw.githubusercontent.com/KanoonGammy/Technical-Analysis-Project/refs/heads/main/SET_Index.csv", index_col= "Unnamed: 0").sort_values(["symbol"], ascending= True)
 
 # Main app layout
-hc1,hc2,hc3 = st.columns([7,7,2])
+hc1, hc2, hc3 = st.columns([7, 5, 4])
 with hc1:
     st.header("APG Station: Market Overviews")
+with hc2:
+    # Display the latest data update date
+    last_update_date = dp.index[-1].strftime('%d %b %Y')
+    st.markdown(f"<p style='text-align: right; margin-top: 35px; color: grey;'>Data as of: {last_update_date}</p>", unsafe_allow_html=True)
 with hc3:
+    # Display SET Index metric
     if "SET" in dp.columns:
         SI = dp[["SET"]].copy().ffill().bfill()
         SI["Change"] = SI.pct_change()
         st.metric("SET Index", value = f"{SI['SET'].iloc[-1]:.2f}", delta = f"{SI['Change'].iloc[-1]:.4f}%" )
 
+# --- [FIX] Moved filters to the top level ---
+st.markdown("---")
+rawt1,sl11,sl12,sl13,sl14 = select_market("main_filters")
+rawt1["sub-sector"] = rawt1["sub-sector"].fillna("None")
+selection = rawt1.reset_index(drop = True)
+selection.index = selection.index + 1
+selection = selection["symbol"]
+
 #"""===================================SETTING TAB==================================="""
 tab1, tab2, tab3, tab4 = st.tabs(["🏆 Ranking and Change", "📈 Performance and 52 Week High Low",
                                  "📊 Volume Analysis", "🔥 Sector Heatmap"])
 
+
 # --- All data sources are prepared here once ---
 with st.spinner("Preparing data for analysis..."):
-    # TAB 1 Data
-    rawt1,_,_,_,_ = select_market("tab1")
-    rawt1["sub-sector"] = rawt1["sub-sector"].fillna("None")
-    selection = rawt1["symbol"]
-    
     # RS Score
     data_rs = dp.copy().ffill().bfill()
     Q1 = data_rs.pct_change(65).iloc[-1]
@@ -163,17 +172,7 @@ with st.spinner("Preparing data for analysis..."):
         
     SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod = get_vwap_data("SET")
     mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod = get_vwap_data("mai")
-
-    # --- Prepare and "remember" the master AI datasource in session state ---
-    data_for_ai_tuple = (
-        rs_score_data, VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
-        source_52SET, source_52mai, perf_source_SET, perf_source_mai,
-        SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod,
-        mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod
-    )
-    if 'ai_datasource' not in st.session_state:
-        st.session_state.ai_datasource = prepare_ai_datasource(data_for_ai_tuple)
-
+    
 #"""===================================TAB 1 RENDER==================================="""
 with tab1:
     col0, col1 = st.columns([1,3])
@@ -259,11 +258,12 @@ with tab3:
                 fig_sector = make_subplots(rows=len(sectors), cols=1, subplot_titles=sectors)
                 for i, sector in enumerate(sectors):
                     tickers = sorted(raw_std[(raw_std["sector"] == sector) & (raw_std["market"] == market)]["symbol"].unique())
-                    if not tickers: continue
-                    temp_mc = mc[mc["Symbols"].isin(tickers)]
+                    valid_tickers = [t for t in tickers if t in dv.columns]
+                    if not valid_tickers: continue
+                    temp_mc = mc[mc["Symbols"].isin(valid_tickers)]
                     if temp_mc.empty or temp_mc["MarketCap"].sum() == 0: continue
                     temp_mc["weight"] = temp_mc["MarketCap"] / temp_mc["MarketCap"].sum()
-                    va_df = dv[tickers].tail(period_sector + 70).copy().fillna(0).reset_index().melt(id_vars=["Date"], var_name="Name", value_name="Volume")
+                    va_df = dv[valid_tickers].tail(period_sector + 70).copy().fillna(0).reset_index().melt(id_vars=["Date"], var_name="Name", value_name="Volume")
                     va_df = va_df.merge(temp_mc, left_on="Name", right_on="Symbols").drop("Symbols", axis=1)
                     va_df["Weighted_Volume"] = va_df["Volume"] * va_df["weight"]
                     pivot_va = va_df.groupby('Date')['Weighted_Volume'].sum()
@@ -390,6 +390,16 @@ with st.sidebar:
     """
 
     if st.button("วิเคราะห์หุ้นที่น่าสนใจ"):
+        # Store the prepared data in session state if it doesn't exist
+        if 'ai_datasource' not in st.session_state:
+            data_for_ai_tuple = (
+                rs_score_data, VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
+                source_52SET, source_52mai, perf_source_SET, perf_source_mai,
+                SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod,
+                mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod
+            )
+            st.session_state.ai_datasource = prepare_ai_datasource(data_for_ai_tuple)
+
         # Call the AI function with filters and display the response in the sidebar
         response_text = get_ai_response(
             analysis_prompt, 
