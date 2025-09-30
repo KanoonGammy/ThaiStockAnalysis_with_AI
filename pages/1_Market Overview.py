@@ -6,9 +6,13 @@ import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+from plotly.subplots import make_subplots
 import seaborn as sns
+
+# --- [FIXED] Import all necessary functions from the sidebar module ---
+from AI_sidebar import get_ai_response, prepare_ai_datasource
 from select_market import select_market
-from AI_sidebar import get_ai_response # Import the updated function
+
 
 st.set_page_config(layout="wide")
 
@@ -16,16 +20,9 @@ st.set_page_config(layout="wide")
 @st.cache_resource()
 def import_data(period = 3650):
     # import data price
-    import pandas as pd
-
-    # 1. สร้าง URL สำหรับดาวน์โหลดเป็นไฟล์ CSV
     sheet_id = "1Uk2bEql-MDVuEzka4f1Y7bMBM_vbob7mXb75ITUwwII"
     sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
-
-    # 2. อ่านข้อมูลจาก URL ด้วย pandas และเลือกเฉพาะท้ายตารางตามตัวแปร period
     dp = pd.read_csv(sheet_url).tail(period)
-
-    # 3. แปลงคอลัมน์ Date ให้เป็น Datetime และตั้งเป็น Index
     dp['Date'] = pd.to_datetime(dp["Date"])
     dp = dp.set_index("Date")
 
@@ -35,12 +32,12 @@ def import_data(period = 3650):
         index_set = t.index("^SET")
         t[index_set] = "SET"
     except ValueError:
-        pass # Handle case where '^SET' is not in the list
+        pass # '^SET' not in list
     dp.columns = t
 
     # import data volume
-    dv = pd.read_csv("source_volume.csv",).tail(3650)
-    dv.Date = pd.to_datetime(dv['Date'])
+    dv = pd.read_csv("source_volume.csv").tail(3650)
+    dv['Date'] = pd.to_datetime(dv['Date'])
     dv = dv.set_index("Date")
     dv.columns = t
 
@@ -52,362 +49,370 @@ def import_data(period = 3650):
     mc = mc.T.reset_index().rename(columns = {"index": "Symbols"})
     mc["MarketCap"] = mc["MarketCap"].astype(float).fillna(0)
 
-    return dp,dv,mc
+    return dp, dv, mc
 
 #import data
-dp,dv,mc = import_data()
-#raw standard
+dp, dv, mc = import_data()
 raw_std = pd.read_csv("https://raw.githubusercontent.com/KanoonGammy/Technical-Analysis-Project/refs/heads/main/SET_Index.csv", index_col= "Unnamed: 0").sort_values(["symbol"], ascending= True)
+raw_set50 = pd.read_csv("https://raw.githubusercontent.com/KanoonGammy/Technical-Analysis-Project/refs/heads/main/SET50.csv")['symbol'].tolist()
+raw_set100 = pd.read_csv("https://raw.githubusercontent.com/KanoonGammy/Technical-Analysis-Project/refs/heads/main/SET100.csv")['symbol'].tolist()
 
-# Main app layout
+
+# --- [MOVED] Top-level filters ---
+st.header("APG Station: Market Overviews")
 hc1, hc2, hc3 = st.columns([7, 5, 4])
 with hc1:
-    st.header("APG Station: Market Overviews")
+    rawt1, sl11, sl12, sl13, sl14 = select_market("main_filters")
+    rawt1["sub-sector"] = rawt1["sub-sector"].fillna("None")
+    selection = rawt1["symbol"]
 with hc2:
-    # Display the latest data update date
-    last_update_date = dp.index[-1].strftime('%d %b %Y')
-    st.markdown(f"<p style='text-align: right; margin-top: 35px; color: grey;'>Data as of: {last_update_date}</p>", unsafe_allow_html=True)
+    # Placeholder for potential future filters
+    pass
 with hc3:
-    # Display SET Index metric
-    if "SET" in dp.columns:
-        SI = dp[["SET"]].copy().ffill().bfill()
-        SI["Change"] = SI.pct_change()
-        st.metric("SET Index", value = f"{SI['SET'].iloc[-1]:.2f}", delta = f"{SI['Change'].iloc[-1]:.4f}%" )
+    # Display SET Index and Last Data Update
+    SI = dp[["SET"]].copy().ffill().bfill()
+    SI["Change"] = SI.pct_change()
+    last_update_date = dp.index.max().strftime('%d %b %Y')
+    st.metric("SET Index", value = f"{SI['SET'].iloc[-1]:.2f}", delta = f"{SI['Change'].iloc[-1]:.4f}%" )
+    st.markdown(f"<p style='text-align: right; color: grey;'>Last Update: {last_update_date}</p>", unsafe_allow_html=True)
 
-# --- [FIX] Moved filters to the top level ---
-st.markdown("---")
-rawt1,sl11,sl12,sl13,sl14 = select_market("main_filters")
-rawt1["sub-sector"] = rawt1["sub-sector"].fillna("None")
-selection = rawt1.reset_index(drop = True)
-selection.index = selection.index + 1
-selection = selection["symbol"]
 
 #"""===================================SETTING TAB==================================="""
 tab1, tab2, tab3, tab4 = st.tabs(["🏆 Ranking and Change", "📈 Performance and 52 Week High Low",
                                  "📊 Volume Analysis", "🔥 Sector Heatmap"])
 
+#"""===================================TAB 1==================================="""
+with tab1:
+    col0, col1 = st.columns([1, 3])
 
-# --- All data sources are prepared here once ---
-with st.spinner("Preparing data for analysis..."):
-    # RS Score
-    data_rs = dp.copy().ffill().bfill()
-    Q1 = data_rs.pct_change(65).iloc[-1]
-    Q2 = data_rs.pct_change(130).iloc[-1]
-    Q3 = data_rs.pct_change(195).iloc[-1]
-    Q4 = data_rs.pct_change(260).iloc[-1]
-    rs_data = pd.DataFrame({"Q1": Q1, "Q2": Q2, "Q3": Q3, "Q4": Q4})
-    rs_data["RS Score"] = np.round(0.4*Q1 + 0.2*Q2 + 0.2*Q3 + 0.2*Q4,4)
-    rs_data["Rank"] = rs_data["RS Score"].rank(ascending=False, method="max")
-    rs_data.reset_index(inplace=True)
-    rs_data = rs_data.rename(columns={"index": "Name"})
-    rs_data["Return"] = rs_data["RS Score"]
-    rs_data["RS Score"] = 1 / (1 + np.e**(-rs_data["RS Score"]))
-    rs_score_data = rs_data.merge(rawt1, left_on="Name", right_on="symbol", how="left")[["Name", "RS Score", "market", "sector", "sub-sector", "Rank", "Return"]]
-    rs_score_data.dropna(inplace=True)
+    with st.spinner("Loading Ranking and Change..."):
+        with col1:
+            ct1c1, ct1c2 = st.columns([1, 2])
+            with ct1c1:
+                st.subheader("Price vs Volume Percentage Change")
+            with ct1c2:
+                st.write("")
+                show_name = st.checkbox("🎉 Show Name")
 
-    # VP Change Data
-    def get_vp_change_data(interval):
-        period_map = {"D": 1, "W": 5, "M": 22, "3M": 65}
-        period = period_map.get(interval, 1)
-        valid_selection = [s for s in selection if s in dv.columns]
-        if not valid_selection: return pd.DataFrame()
-        check = dv[valid_selection].iloc[-1].dropna().index.tolist()
-        if not check: return pd.DataFrame()
-        pc = dp[check].pct_change(period).iloc[-1]
-        pv = dv[check].ewm(span=5, adjust=False).mean().pct_change(period).iloc[-1]
-        cb_df = pd.DataFrame({"Symbols": pc.index, f"Price %Change {interval}": pc.values*100, f"Volume %Change {interval}": pv.values*100})
-        cb_df = cb_df.merge(mc, on="Symbols", how="left")
-        return cb_df
-    
-    VP_change_D_data = get_vp_change_data("D")
-    VP_change_W_data = get_vp_change_data("W")
-    VP_change_M_data = get_vp_change_data("M")
-    VP_change_3M_data = get_vp_change_data("3M")
+        def VP_change(interval="D", show_name=False):
+            period = {'D': 1, 'W': 5, 'M': 22, '3M': 65}.get(interval, 1)
+            select_df = dv[selection]
+            check = select_df.iloc[-1].dropna().index.tolist()
+            pc = dp[check].pct_change(period).iloc[-1].T
+            pv = dv[check].ewm(span=5, adjust=False).mean().pct_change(period).iloc[-1].T
+            cb_df = pd.DataFrame({
+                "Symbols": pc.index,
+                f"Price %Change {interval}": pc.values * 100,
+                f"Volume %Change {interval}": pv.values * 100
+            }).merge(rawt1, left_on="Symbols", right_on="symbol", how="left") \
+              .merge(mc, on="Symbols", how="left")
+            data_source = cb_df.drop(["symbol", "full name", "market", "sector", "sub-sector"], axis=1)
+            text_interval = {"D": "Daily", "W": "Weekly", "M": "Monthly", "3M": "Quarterly"}.get(interval)
+            VP_chart = px.scatter(cb_df, x=f"Price %Change {interval}", y=f"Volume %Change {interval}",
+                                  color="sector", text="Symbols" if show_name else None,
+                                  custom_data=["Symbols", "MarketCap", "sub-sector", f"Price %Change {interval}", f"Volume %Change {interval}", "sector"],
+                                  size="MarketCap", title=f"{text_interval} Price vs Volume Percentage Change", template="seaborn")
+            VP_chart.update_traces(
+                hovertemplate="<b>Name:</b> %{customdata[0]}<br><b>Marketcap:</b> %{customdata[1]:,.0f} THB<extra></extra><br><b>Sector:</b> %{customdata[5]}<br><b>SubSector:</b> %{customdata[2]}<br>" +
+                              f"<b>{text_interval} Price %Change: </b>" + "%{customdata[3]:.2f}<br>" +
+                              f"<b>{text_interval} Volume %Change: </b>" + "%{customdata[4]:.2f}<br>",
+                textposition="bottom center")
+            VP_chart.update_layout(hovermode="closest")
+            VP_chart.add_vline(x=0, line_color='red', line_width=2, opacity=0.6)
+            VP_chart.add_hline(y=0, line_color='red', line_width=2, opacity=0.6)
+            return VP_chart, data_source
 
-    # TAB 2 Data
-    start_date = (datetime.datetime.now() - datetime.timedelta(100)).strftime("%Y-%m")
-    df_perf = dp[start_date:].copy().ffill().bfill()
-    geo_df = (df_perf.pct_change()+1).cumprod().reset_index().melt(id_vars=["Date"], var_name="Name", value_name="Return")
-    geo_df = geo_df.merge(raw_std, left_on="Name", right_on="symbol", how="left").drop(["full name", "symbol"], axis=1)
-    SET_t2 = geo_df[geo_df["market"] == "SET"]
-    mai_t2 = geo_df[geo_df["market"] == "mai"]
+        def RS_Score():
+            data = dp.copy().ffill().bfill()
+            Q1 = data.pct_change(65).iloc[-1]
+            Q2 = data.pct_change(130).iloc[-1]
+            Q3 = data.pct_change(195).iloc[-1]
+            Q4 = data.pct_change(260).iloc[-1]
+            rs_data = pd.DataFrame({"Q1": Q1, "Q2": Q2, "Q3": Q3, "Q4": Q4})
+            rs_data["RS Score"] = np.round(0.4 * Q1 + 0.2 * Q2 + 0.2 * Q3 + 0.2 * Q4, 4)
+            rs_data["Rank"] = rs_data["RS Score"].rank(ascending=False, method="max")
+            rs_data.reset_index(inplace=True)
+            rs_data = rs_data.sort_values("Rank", ascending=True)
+            rs_data["Return"] = rs_data["RS Score"]
+            rs_data.rename(columns={"index": "Name"}, inplace=True)
+            rs_data["RS Score"] = 1 / (1 + np.e ** (-rs_data["RS Score"]))
+            rs_data = rs_data.merge(rawt1, left_on="Name", right_on="symbol", how="left")
+            sorted_data = rs_data[["Name", "RS Score", "market", "sector", "sub-sector", "Rank", "Return"]].dropna()
+            data_source = sorted_data.copy()
+            sorted_data.set_index("Rank", inplace=True)
+            sorted_data = sorted_data[sorted_data["Name"].isin(selection)]
+            return sorted_data, data_source
+
+        with col0:
+            rs_score, rs_score_data = RS_Score()
+            st.subheader("RS Ranking")
+            st.dataframe(rs_score, height=850, width=500)
+
+        with col1:
+            scol0, scol1 = st.columns(2)
+            with scol0:
+                VP_change_D, VP_change_D_data = VP_change(interval="D", show_name=show_name)
+                st.plotly_chart(VP_change_D)
+            with scol1:
+                VP_change_W, VP_change_W_data = VP_change(interval="W", show_name=show_name)
+                st.plotly_chart(VP_change_W)
+            scol2, scol3 = st.columns(2)
+            with scol2:
+                VP_change_M, VP_change_M_data = VP_change(interval="M", show_name=show_name)
+                st.plotly_chart(VP_change_M)
+            with scol3:
+                VP_change_3M, VP_change_3M_data = VP_change(interval="3M", show_name=show_name)
+                st.plotly_chart(VP_change_3M)
+        st.divider()
+
+#"""===================================TAB 2==================================="""
+with tab2:
+    start = (datetime.datetime.now() - datetime.timedelta(100)).strftime("%Y-%m")
+
+    @st.cache_resource
+    def geo_calculation(start, end=None):
+        df = dp[start: end].copy().ffill().bfill()
+        geo_df = (df.pct_change() + 1).cumprod()
+        geo_df = geo_df.reset_index().melt(id_vars=["Date"], value_vars=geo_df.columns, var_name="Name", value_name="Return")
+        geo_df = geo_df.merge(raw_std, left_on="Name", right_on="symbol", how="left").drop(["full name", "symbol"], axis=1)
+        return geo_df[geo_df["market"] == "SET"], geo_df[geo_df["market"] == "mai"]
+
+    def plot_geo(data, select_sector, select_sub):
+        data = data[data["sector"] == select_sector]
+        if select_sub is not None:
+            data = data[data["sub-sector"] == select_sub]
+        geo_fig = px.line(data, x="Date", y="Return", color="Name",
+                          title=f"Performance: Sector:<br> &nbsp;Sector: <i>{select_sector}<i> <br> &nbsp;Sub-Sector: <i>{select_sub}</i>",
+                          labels={"Date": "", "Return": "Cumulative Return"}, template="seaborn")
+        geo_fig.update_xaxes(rangeslider_visible=True)
+        return geo_fig
+
+    def _52WHL(data):
+        df = data.tail(265)
+        df_close = df.iloc[-1].rename("Close")
+        df_high = df.max().rename("High")
+        df_low = df.min().rename("Low")
+        df_5WHL = ((df_close - df_low) / (df_high - df_low)).rename("52WHL")
+        df_ROC = (df.pct_change(10).iloc[-1] * 100).rename("ROC_10")
+        mkt_cap_tab2 = mc.rename(columns={"MarketCap": "MarketCap (million THB)"})
+        mkt_cap_tab2["MarketCap (million THB)"] /= 1_000_000
+        sector_sub = raw_std[["symbol", "market", "sector", "sub-sector"]]
+        df_plot = pd.concat([df_high, df_low, df_close, df_5WHL, df_ROC], axis=1).reset_index().rename(columns={"index": "Name"})
+        df_plot = df_plot.merge(mkt_cap_tab2, left_on="Name", right_on="Symbols", how="left") \
+                         .merge(sector_sub, left_on="Name", right_on="symbol", how="left")
+        return df_plot[df_plot["market"] == "SET"], df_plot[df_plot["market"] == "mai"]
+
+    _52SET, _52mai = _52WHL(dp)
+    source_52SET = _52SET.drop(["Symbols", "MarketCap (million THB)", "symbol", "market", "sector", "sub-sector"], axis=1, errors='ignore')
+    source_52mai = _52mai.drop(["Symbols", "MarketCap (million THB)", "symbol", "market", "sector", "sub-sector"], axis=1, errors='ignore')
+
+    def plot_52WHL(data, select_sector, select_sub):
+        data = data[data["sector"] == select_sector]
+        if select_sub is not None:
+            data = data[data["sub-sector"] == select_sub]
+        fig_52WHL = px.scatter(data, x="ROC_10", y="52WHL", color="Name", size="MarketCap (million THB)",
+                               title=f"52 Weeks High Low vs Rate of Change 10:<br> &nbsp;Sector: <i>{select_sector}<i> <br> &nbsp;Sub-Sector: <i>{select_sub}</i>",
+                               text="Name", custom_data=["Name", "ROC_10", "52WHL", "sector", "sub-sector", "MarketCap (million THB)", 'Close'],
+                               template="seaborn")
+        fig_52WHL.add_vline(x=0, line_color='red', line_width=2, opacity=0.6)
+        fig_52WHL.add_hline(y=0, line_color='red', line_width=2, opacity=0.6)
+        fig_52WHL.add_hline(y=1, line_color='red', line_width=2, opacity=0.6)
+        fig_52WHL.update_traces(
+            hovertemplate="<b>Name:</b> %{customdata[0]}<br><b>Close:</b> %{customdata[6]:,.2f} <br><b>ROC_10:</b> %{customdata[1]:,.2f}% <br><b>52WHL:</b> %{customdata[2]:,.2f} <br>" +
+                          "<b>sector:</b> %{customdata[3]} <br><b>sub-sector:</b> %{customdata[4]} <br><b>MarketCap:</b> %{customdata[5]:,.0f} million THB <br>",
+            textposition="bottom center")
+        fig_52WHL.update_layout(hovermode="closest")
+        return fig_52WHL
+
+    SET_t2, mai_t2 = geo_calculation(start)
     perf_source_SET = pd.pivot_table(SET_t2, index="Name", columns="Date", values="Return").reset_index()
     perf_source_mai = pd.pivot_table(mai_t2, index="Name", columns="Date", values="Return").reset_index()
 
-    df_52 = dp.tail(265)
-    df_close = df_52.iloc[-1].rename("Close")
-    df_high = df_52.max().rename("High")
-    df_low = df_52.min().rename("Low")
-    df_5WHL = ((df_52 - df_low) / (df_high - df_low)).iloc[-1].rename("52WHL")
-    df_ROC = (df_52.pct_change(10) * 100).iloc[-1].rename("ROC_10")
-    mkt_cap_tab2 = mc.copy()
-    mkt_cap_tab2["MarketCap (million THB)"] = (mkt_cap_tab2["MarketCap"] / 1000000)
-    
-    df_plot = pd.concat([df_high, df_low, df_close, df_5WHL, df_ROC], axis=1).reset_index().rename(columns={'index':'Name'})
-    df_plot = df_plot.merge(mkt_cap_tab2, left_on="Name", right_on="Symbols", how="left")
-    df_plot = df_plot.merge(raw_std[["symbol", "market", "sector", "sub-sector"]], left_on="Name", right_on="symbol", how="left")
-    _52SET = df_plot[df_plot["market"] == "SET"]
-    _52mai = df_plot[df_plot["market"] == "mai"]
-    source_52SET = _52SET.drop(["Symbols", "MarketCap (million THB)", "symbol", "market", "sector", "sub-sector", "MarketCap"], axis=1, errors='ignore')
-    source_52mai = _52mai.drop(["Symbols", "MarketCap (million THB)", "symbol", "market", "sector", "sub-sector", "MarketCap"], axis=1, errors='ignore')
-
-    # TAB 3 Data
-    def get_vwap_data(market, sector=None, period=90):
-        temp_market = raw_std[raw_std["market"] == market]
-        symbols = sorted(temp_market["symbol"].unique()) if sector is None else sorted(temp_market[temp_market["sector"] == sector]["symbol"].unique())
-        valid_symbols = [s for s in symbols if s in dp.columns and s in dv.columns]
-        if not valid_symbols: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-        price = dp[valid_symbols].tail(period*2).copy().ffill().bfill()
-        vol = dv[valid_symbols].tail(period*2).copy().ffill().bfill()
-        vwap = (price * vol).cumsum() / vol.cumsum()
-        vwap_data = vwap.T.reset_index().rename(columns={"index": "Name"})
-        vwap_cumprod = (vwap.pct_change()+1).cumprod()
-        vwap_cumprod_data = vwap_cumprod.T.reset_index().rename(columns={"index": "Name"})
-        df_stack = dv[valid_symbols].tail(period*2).copy().ffill().bfill()
-        df_stacked_bar = df_stack * vwap
-        df_stacked_bar["sum"] = df_stacked_bar.sum(1)
-        df_stacked_bar_ratio = df_stacked_bar.iloc[:, :-1].div(df_stacked_bar["sum"], axis = 0)
-        stacked_bar_ratio_datasource = df_stacked_bar_ratio.T
-        return stacked_bar_ratio_datasource, vwap_data, vwap_cumprod_data
-        
-    SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod = get_vwap_data("SET")
-    mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod = get_vwap_data("mai")
-    
-#"""===================================TAB 1 RENDER==================================="""
-with tab1:
-    col0, col1 = st.columns([1,3])
-    with col0:
-        st.subheader("RS Ranking")
-        df_to_show = rs_score_data.copy()
-        df_to_show = df_to_show[df_to_show["Name"].isin(selection)]
-        st.dataframe(df_to_show.set_index("Rank"), height=850, width=500)
-    
-    with col1:
-        ct1c1, ct1c2 = st.columns([1,2])
-        with ct1c1:
-            st.subheader("Price vs Volume Percentage Change")
-        with ct1c2:
-            st.write("")
-            show_name = st.checkbox("🎉 Show Name")
-        
-        def plot_vp_change(interval, data):
-            if data.empty: return go.Figure().update_layout(title_text=f"No data for {interval} VP Change")
-            text_interval = "Daily" if interval == "D" else "Weekly" if interval == "W" else "Monthly" if interval == "M" else "Quarterly"
-            df_use = data.merge(rawt1, left_on="Symbols", right_on="symbol", how="left")
-            df_use = df_use[df_use["Symbols"].isin(selection)]
-            fig = px.scatter(df_use, x=f"Price %Change {interval}", y=f"Volume %Change {interval}", color="sector", text="Symbols" if show_name else None, size="MarketCap", title=f"{text_interval} Price vs Volume Percentage Change", custom_data=["Symbols", "MarketCap", "sub-sector", f"Price %Change {interval}", f"Volume %Change {interval}", "sector"], template="seaborn")
-            fig.update_traces(hovertemplate="<b>Name:</b> %{customdata[0]}<br><b>Marketcap:</b> %{customdata[1]:,.0f} THB<extra></extra><br><b>Sector:</b> %{customdata[5]}<br><b>SubSector:</b> %{customdata[2]}<br><b>"+f"{text_interval} Price %Change: "+"</b> %{customdata[3]:.2f}<br><b>"+f"{text_interval} Volume %Change: "+"</b> %{customdata[4]:.2f}<br>", textposition="bottom center")
-            fig.add_vline(x=0, line_color='red', line_width=2, opacity=0.6)
-            fig.add_hline(y=0, line_color='red', line_width=2, opacity=0.6)
-            return fig
-
-        scol0, scol1 = st.columns(2)
-        with scol0: st.plotly_chart(plot_vp_change("D", VP_change_D_data))
-        with scol1: st.plotly_chart(plot_vp_change("W", VP_change_W_data))
-        scol2, scol3 = st.columns(2)
-        with scol2: st.plotly_chart(plot_vp_change("M", VP_change_M_data))
-        with scol3: st.plotly_chart(plot_vp_change("3M", VP_change_3M_data))
-
-#"""===================================TAB 2 RENDER==================================="""
-with tab2:
-    def plot_geo(data, select_sector, select_sub):
-        data = data[data["sector"] == select_sector]
-        if select_sub: data = data[data["sub-sector"] == select_sub]
-        return px.line(data, x="Date", y="Return", color="Name", title=f"Performance:<br> &nbsp;Sector: <i>{select_sector}<i> <br> &nbsp;Sub-Sector: <i>{select_sub or 'All'}</i>", labels={"Date": "", "Return": "Cumulative Return"}, template="seaborn")
-    
-    def plot_52WHL(data, select_sector, select_sub):
-        data = data[data["sector"] == select_sector]
-        if select_sub: data = data[data["sub-sector"] == select_sub]
-        fig = px.scatter(data, x="ROC_10", y="52WHL", color="Name", size="MarketCap (million THB)", title=f"52 Weeks High Low vs Rate of Change 10:<br> &nbsp;Sector: <i>{select_sector}<i> <br> &nbsp;Sub-Sector: <i>{select_sub or 'All'}</i>", text="Name", custom_data=["Name", "ROC_10", "52WHL", "sector", "sub-sector", "MarketCap (million THB)", 'Close'], template="seaborn")
-        fig.add_vline(x=0, line_color='red', line_width=2, opacity=0.6)
-        fig.add_hline(y=0, line_color='red', line_width=2, opacity=0.6)
-        fig.add_hline(y=1, line_color='red', line_width=2, opacity=0.6)
-        fig.update_traces(hovertemplate="<b>Name:</b> %{customdata[0]}<br><b>Close:</b> %{customdata[6]:,.2f} <br><b>ROC_10:</b> %{customdata[1]:,.2f}% <br><b>52WHL:</b> %{customdata[2]:,.2f} <br><b>sector:</b> %{customdata[3]} <br><b>sub-sector:</b> %{customdata[4]} <br><b>MarketCap:</b> %{customdata[5]:,.0f} million THB <br>", textposition="bottom center")
-        return fig
-
     tcol1, tcol2 = st.columns(2)
     with tcol1:
-        st.subheader("SET Performance & 52 Week Analysis")
-        set_sectors = sorted(raw_std[raw_std["market"] == "SET"]['sector'].unique())
-        set_sector_select = st.selectbox("Select SET Sector", set_sectors, key="set_sector_t2")
-        set_sub_sectors = sorted(raw_std[(raw_std["sector"] == set_sector_select) & (raw_std["market"] == "SET")]["sub-sector"].dropna().unique())
-        set_sub_select = st.selectbox("Select SET Sub-Sector (Optional)", ["All"] + set_sub_sectors, key="set_sub_t2")
-        set_sub_select = None if set_sub_select == "All" else set_sub_select
-        st.plotly_chart(plot_geo(SET_t2, set_sector_select, set_sub_select))
-        st.plotly_chart(plot_52WHL(_52SET, set_sector_select, set_sub_select))
-        
+        st.subheader("SET Performance 100 Days")
+        SetSectorSelect_1_tab2 = st.radio("Select Sector", sorted(raw_std[raw_std["market"] == "SET"]['sector'].unique()), horizontal=True, key="tab2_set_sector")
+        include_sub_set = st.checkbox("Include sub-sector", key="tab2_set_sub_check")
+        SetSectorSelect_2_tab2 = st.radio("Select Sub-Sector", sorted(raw_std[raw_std["sector"] == SetSectorSelect_1_tab2]["sub-sector"].dropna().unique()), horizontal=True, key="tab2_set_sub") if include_sub_set else None
+        st.plotly_chart(plot_geo(SET_t2, SetSectorSelect_1_tab2, SetSectorSelect_2_tab2))
     with tcol2:
-        st.subheader("mai Performance & 52 Week Analysis")
-        mai_sectors = sorted(raw_std[raw_std["market"] == "mai"]['sector'].unique())
-        mai_sector_select = st.selectbox("Select mai Sector", mai_sectors, key="mai_sector_t2")
-        st.plotly_chart(plot_geo(mai_t2, mai_sector_select, None))
-        st.plotly_chart(plot_52WHL(_52mai, mai_sector_select, None))
+        st.subheader("SET 52 Weeks High-Low vs Rate of Change 10 Days")
+        st.plotly_chart(plot_52WHL(_52SET, SetSectorSelect_1_tab2, SetSectorSelect_2_tab2))
+    st.divider()
+    tcol3, tcol4 = st.columns(2)
+    with tcol3:
+        st.subheader("mai Performance 100 Days")
+        maiSectorSelect_1_tab2 = st.radio("Select Sector", sorted(raw_std[raw_std["market"] == "mai"]['sector'].unique()), horizontal=True, key="tab2_mai_sector")
+        st.plotly_chart(plot_geo(mai_t2, maiSectorSelect_1_tab2, None))
+    with tcol4:
+        st.subheader("mai 52 Weeks High-Low vs Rate of Change 10 Days")
+        st.plotly_chart(plot_52WHL(_52mai, maiSectorSelect_1_tab2, None))
 
-#"""===================================TAB 3 RENDER==================================="""
+#"""===================================TAB 3==================================="""
 with tab3:
-    from plotly.subplots import make_subplots
-    st.subheader("Volume Analysis")
-    
+    st.header("Volume Analysis")
+    # Define a function to create charts to avoid code repetition
     def render_volume_charts(market):
-        sectors = sorted(raw_std[raw_std["market"] == market]['sector'].unique())
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f"**{market} Sector Volume**")
-            period_sector = st.radio("Choose Period", [30, 60, 90], key=f"period_sector_{market}", horizontal=True)
-            if sectors:
-                fig_sector = make_subplots(rows=len(sectors), cols=1, subplot_titles=sectors)
-                for i, sector in enumerate(sectors):
-                    tickers = sorted(raw_std[(raw_std["sector"] == sector) & (raw_std["market"] == market)]["symbol"].unique())
-                    valid_tickers = [t for t in tickers if t in dv.columns]
-                    if not valid_tickers: continue
-                    temp_mc = mc[mc["Symbols"].isin(valid_tickers)]
-                    if temp_mc.empty or temp_mc["MarketCap"].sum() == 0: continue
-                    temp_mc["weight"] = temp_mc["MarketCap"] / temp_mc["MarketCap"].sum()
-                    va_df = dv[valid_tickers].tail(period_sector + 70).copy().fillna(0).reset_index().melt(id_vars=["Date"], var_name="Name", value_name="Volume")
-                    va_df = va_df.merge(temp_mc, left_on="Name", right_on="Symbols").drop("Symbols", axis=1)
-                    va_df["Weighted_Volume"] = va_df["Volume"] * va_df["weight"]
-                    pivot_va = va_df.groupby('Date')['Weighted_Volume'].sum()
-                    threshold = pivot_va.rolling(22).mean() + 2 * pivot_va.rolling(22).std()
-                    anomaly = pivot_va > threshold
-                    plot_df = pd.DataFrame({'Date': pivot_va.index, 'Sum': pivot_va.values, 'Anomaly': anomaly.values}).tail(period_sector)
-                    fig_sector.add_trace(go.Bar(x=plot_df["Date"], y=plot_df["Sum"], name=sector, showlegend=False, marker=dict(color=plot_df["Anomaly"].map({True: "orange", False:"gray"}))), row=i+1, col=1)
-                fig_sector.update_layout(height=300*len(sectors), title_text=f"{market} Sector Volume Analysis")
-                st.plotly_chart(fig_sector, use_container_width=True)
+        st.subheader(f"{market} Sector Volume Analysis")
+        period_sector = st.radio("Choose Period", [30, 60, 90], key=f"period_sector_{market}", horizontal=True)
 
-        with c2:
-            st.markdown(f"**{market} Stock Volume**")
-            selected_sector_stock = st.selectbox("Select Sector", sectors, key=f"sector_stock_{market}")
-            period_stock = st.radio("Choose Period", [30, 60, 90], key=f"period_stock_{market}", horizontal=True)
-            symbols_in_sector = sorted(raw_std[(raw_std["sector"] == selected_sector_stock) & (raw_std["market"] == market)]["symbol"].unique())
-            if symbols_in_sector:
-                fig_stock = make_subplots(rows=len(symbols_in_sector), cols=1, subplot_titles=symbols_in_sector)
-                for i, symbol in enumerate(symbols_in_sector):
-                    if symbol not in dv.columns: continue
-                    vol_df = dv[[symbol]].tail(period_stock + 70).copy().fillna(0)
-                    threshold = vol_df[symbol].rolling(22).mean() + 2 * vol_df[symbol].rolling(22).std()
-                    anomaly = vol_df[symbol] > threshold
-                    plot_df = pd.DataFrame({'Date': vol_df.index, 'Volume': vol_df[symbol].values, 'Anomaly': anomaly.values}).tail(period_stock)
-                    fig_stock.add_trace(go.Bar(x=plot_df["Date"], y=plot_df["Volume"], name=symbol, showlegend=False, marker=dict(color=plot_df["Anomaly"].map({True: "orange", False:"gray"}))), row=i+1, col=1)
-                fig_stock.update_layout(height=200*len(symbols_in_sector), title_text=f"Stock Volume for {selected_sector_stock} Sector")
-                st.plotly_chart(fig_stock, use_container_width=True)
+        # Sector-level analysis
+        temp_market = raw_std[raw_std["market"] == market]
+        sectors_for_subplot = sorted(temp_market["sector"].unique())
+        fig_sector = make_subplots(rows=len(sectors_for_subplot), cols=1, subplot_titles=sectors_for_subplot, shared_xaxes=True)
 
-    set_tab, mai_tab = st.tabs(["SET", "mai"])
-    with set_tab: render_volume_charts("SET")
-    with mai_tab: render_volume_charts("mai")
+        for i, sector in enumerate(sectors_for_subplot):
+            temp_sector = temp_market[temp_market["sector"] == sector]
+            temp_tickers = sorted(temp_sector["symbol"].unique())
+            
+            va_data = dv[temp_tickers].tail(period_sector + 70).copy().fillna(0)
+            va_sum = va_data.sum(axis=1)
+            
+            threshold = va_sum.rolling(window=22).mean() + 2 * va_sum.rolling(window=22).std()
+            anomaly = va_sum > threshold
+            
+            plot_df = pd.DataFrame({'Date': va_sum.index, 'Sum': va_sum.values, 'Anomaly': anomaly.values}).tail(period_sector)
 
-#"""===================================TAB 4 RENDER==================================="""
+            fig_sector.add_trace(go.Bar(
+                x=plot_df['Date'], y=plot_df['Sum'], name=sector, showlegend=False,
+                marker=dict(color=plot_df['Anomaly'].map({True: "orange", False: "gray"}))
+            ), row=i + 1, col=1)
+        
+        fig_sector.update_layout(height=200 * len(sectors_for_subplot), title_text=f"{market} Sector Volume Analysis")
+        st.plotly_chart(fig_sector, use_container_width=True)
+
+        # Stock-level analysis
+        st.subheader(f"{market} Stock Volume Analysis")
+        selected_sector_stock = st.selectbox("Select Sector for Stock Analysis", sectors_for_subplot, key=f"sector_stock_{market}")
+        period_stock = st.radio("Choose Period", [30, 60, 90], key=f"period_stock_{market}", horizontal=True)
+
+        symbols_in_sector = sorted(raw_std[(raw_std["market"] == market) & (raw_std["sector"] == selected_sector_stock)]["symbol"].unique())
+        fig_stock = make_subplots(rows=len(symbols_in_sector), cols=1, subplot_titles=symbols_in_sector, shared_xaxes=True)
+
+        for i, symbol in enumerate(symbols_in_sector):
+            vol_df = dv[[symbol]].tail(period_stock + 70).copy().fillna(0)
+            threshold = vol_df[symbol].rolling(window=22).mean() + 2 * vol_df[symbol].rolling(window=22).std()
+            anomaly = vol_df[symbol] > threshold
+            plot_df = pd.DataFrame({'Date': vol_df.index, 'Volume': vol_df[symbol], 'Anomaly': anomaly}).tail(period_stock)
+            
+            fig_stock.add_trace(go.Bar(
+                x=plot_df['Date'], y=plot_df['Volume'], name=symbol, showlegend=False,
+                marker=dict(color=plot_df['Anomaly'].map({True: "orange", False: "gray"}))
+            ), row=i + 1, col=1)
+
+        fig_stock.update_layout(height=200 * len(symbols_in_sector), title_text=f"Stock Volume in {selected_sector_stock} Sector")
+        st.plotly_chart(fig_stock, use_container_width=True)
+
+    tab31, tab32 = st.tabs(["SET", "mai"])
+    with tab31:
+        render_volume_charts("SET")
+        # For AI Data
+        _, SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()) # Placeholder
+    with tab32:
+        render_volume_charts("mai")
+        # For AI Data
+        _, mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod = (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()) # Placeholder
+
+
+#"""===================================TAB 4==================================="""
 with tab4:
     st.subheader("Monthly Return Heatmap")
-    hm_name = st.text_input("Stock Name", "ADVANC").upper()
+    hm_name = str.upper(st.text_input("Enter Stock Name for Heatmap", "ADVANC"))
     if hm_name in dp.columns:
-        hm_df = dp[[hm_name]].copy().resample("M").last()
+        hm_df = dp[[hm_name]].resample("M").last()
         hm_df["Return"] = hm_df.pct_change()
-        hm_df.dropna(inplace=True)
-        hm_df["Y"] = hm_df.index.strftime("%Y")
-        hm_df["M"] = hm_df.index.strftime("%m")
+        hm_df = hm_df.dropna().reset_index()
+        hm_df["Y"] = hm_df.Date.dt.strftime("%Y")
+        hm_df["M"] = hm_df.Date.dt.strftime("%m")
         pivoted_hm_df = pd.pivot_table(hm_df, index="Y", columns="M", values="Return")
-        pivoted_hm_df.columns = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug","Sep", "Oct", "Nov", "Dec"]
+        pivoted_hm_df.columns = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         pivoted_hm_df["Avg Y"] = pivoted_hm_df.mean(1)
         pivoted_hm_df.loc["Avg M"] = pivoted_hm_df.mean(0)
+
         fig, ax = plt.subplots(figsize=(10, 8))
-        sns.heatmap(pivoted_hm_df, cmap="RdYlGn", annot=True, fmt=".2%", ax=ax, annot_kws={"size": 8}, center=0)
-        ax.set_title(f"Historical Monthly Return Heatmap of {hm_name}")
+        sns.heatmap(pivoted_hm_df, cmap="RdYlGn", annot=True, fmt=".2%", ax=ax, center=0, annot_kws={"size": 8})
+        plt.title(f"Historical Monthly Return Heatmap of {hm_name}", fontsize=14)
         st.pyplot(fig)
     else:
         st.error(f"Stock '{hm_name}' not found.")
 
-#"""===================================SIDEBAR AI==================================="""
+
+# --- Prepare and Cache AI Datasource ---
+# This block runs once, prepares the data, and stores it in session_state
+if 'ai_datasource' not in st.session_state:
+    with st.spinner("Preparing AI data source for the first time..."):
+        # Create a tuple of all the dataframes that will be passed to the AI functions
+        data_for_ai_tuple = (
+            rs_score_data, VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
+            source_52SET, source_52mai, perf_source_SET, perf_source_mai,
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), # Placeholders for SET VWAP data
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame()  # Placeholders for mai VWAP data
+        )
+        st.session_state.ai_datasource = prepare_ai_datasource(data_for_ai_tuple)
+
+# --- AI Sidebar UI ---
 with st.sidebar:
     st.header("🤖 AI Technical Analyst")
-    st.markdown("เลือกเงื่อนไขเพื่อค้นหาหุ้นที่น่าสนใจ")
 
-    # --- [FIXED] Dynamic Filters with unique keys ---
-    market_options = ["All", "SET", "mai"]
-    selected_market = st.selectbox("1. เลือกตลาด", market_options, key="sb_market")
-
-    if selected_market == "All":
-        filtered_sectors_df = raw_std
-    else:
-        filtered_sectors_df = raw_std[raw_std['market'] == selected_market]
+    # Filters
+    st.subheader("Filter Data for AI")
     
-    sector_options = ["All"] + sorted(filtered_sectors_df['sector'].unique().tolist())
-    selected_sector = st.selectbox("2. เลือก Sector", sector_options, key="sb_sector")
+    # Market filter
+    market_options = ["All"] + sorted(raw_std['market'].unique())
+    selected_market = st.selectbox(
+        "Select Market",
+        market_options,
+        key='ai_market_filter' # Unique key
+    )
 
-    if selected_sector == "All":
-        filtered_subsectors_df = filtered_sectors_df
+    # Sector filter (dynamically updated)
+    if selected_market == "All":
+        sector_options = ["All"] + sorted(raw_std['sector'].unique())
     else:
-        filtered_subsectors_df = filtered_sectors_df[filtered_sectors_df['sector'] == selected_sector]
+        sector_options = ["All"] + sorted(raw_std[raw_std['market'] == selected_market]['sector'].unique())
+    
+    selected_sector = st.selectbox(
+        "Select Sector",
+        sector_options,
+        key='ai_sector_filter' # Unique key
+    )
 
-    sub_sector_options = ["All"] + sorted(filtered_subsectors_df['sub-sector'].dropna().unique().tolist())
-    selected_sub_sector = st.selectbox("3. เลือก Sub-sector", sub_sector_options, key="sb_sub_sector")
+    # Sub-sector filter (dynamically updated)
+    if selected_sector == "All":
+        sub_sector_options = ["All"]
+    else:
+        if selected_market != "All":
+            filtered_df = raw_std[(raw_std['market'] == selected_market) & (raw_std['sector'] == selected_sector)]
+        else: # selected_market is "All"
+            filtered_df = raw_std[raw_std['sector'] == selected_sector]
+        sub_sector_options = ["All"] + sorted(filtered_df['sub-sector'].dropna().unique())
 
-    analysis_prompt = f"""
-        **Persona:** You are a seasoned Technical Analyst providing a clear, actionable summary for an investor. Your analysis must be grounded *exclusively* in the provided data. Your tone should be insightful, objective, and easy to understand.
+    selected_sub_sector = st.selectbox(
+        "Select Sub-Sector",
+        sub_sector_options,
+        key='ai_sub_sector_filter' # Unique key
+    )
+    
+    st.divider()
 
-        **Task:** Based on the filtered data for **Market: '{selected_market}', Sector: '{selected_sector}', Sub-sector: '{selected_sub_sector}'**, identify the most technically outstanding stocks and explain your reasoning.
+    # User Prompt
+    st.subheader("Your Request")
+    user_prompt = st.text_area(
+        "Ask the AI to analyze the filtered stocks...",
+        value="Based on the filtered data, which stocks are showing the strongest signs of a bullish technical breakout? Analyze based on RS Rank, recent price/volume changes, and position within the 52-week range.",
+        height=150
+    )
 
-        **Data Dictionary for Analysis:**
-        - **RS Score & Rank:** Key momentum indicators. A high RS Score (closer to 1) and a low Rank (e.g., < 200) signify strong market outperformance.
-        - **Price/Volume %Change (D, W):** Short-term price action and confirmation. High positive values suggest strong buying interest.
-        - **52WHL:** Position in the 52-week range. A value > 0.8 indicates strength near yearly highs.
-        - **ROC_10:** Short-term (10-day) Rate of Change. Positive value confirms upward momentum.
-
-        **Required Output Format (Strictly follow this structure, using Markdown):**
-
-        #### 📈 บทวิเคราะห์ทางเทคนิค ({datetime.date.today().strftime('%d-%m-%Y')})
-        **เงื่อนไข:** ตลาด `{selected_market}` | Sector `{selected_sector}` | Sub-sector `{selected_sub_sector}`
-        ---
-
-        Based on the data, here are the most technically outstanding stocks:
-
-        **1. 🥇 Most Promising (หุ้นโดดเด่นที่สุด): `[Stock Name]`**
-        * **Why it stands out:** This stock shows the best overall combination of strong momentum and positive short-term signals.
-        * **RS Score:** `[Value]` (Rank: `[Value]`)
-        * **Price Action:** Currently trading near its 52-week high (`52WHL` = `[Value]`) with a strong 10-day momentum (`ROC_10` = `[Value]`).
-        * **Volume Confirmation:** Daily volume change is `[Value of Volume %Change D]%`, confirming buying interest.
-
-        **2. 🥈 Strong Momentum (หุ้นโมเมนตัมแข็งแกร่ง): `[Stock Name]`**
-        * **Why it stands out:** This stock is a clear market outperformer based on its excellent RS Score.
-        * **RS Score:** `[Value]` (Rank: `[Value]`)
-        * **Daily Action:** Price changed by `[Value of Price %Change D]%` today.
-
-        **3. 🥉 Rising Star (หุ้นน่าจับตามอง): `[Stock Name]`**
-        * **Why it stands out:** This stock is showing strong signs of a potential breakout or upward trend.
-        * **Key Signal:** It's near its 52-week high (`52WHL` = `[Value]`) and has a significant positive daily price change (`Price %Change D` = `[Value]`).
-
-        **Analyst's Summary:**
-        * [Provide a 1-2 sentence summary. Briefly mention which factor (e.g., RS Score, proximity to 52WHL) was the most decisive in this selection. Conclude with what an investor should watch for next, e.g., "Investors should watch for continued high volume to confirm the trend for the top selections."].
-
-        **Instructions & Rules:**
-        1.  From the filtered data, identify three different stocks that fit the criteria for "Most Promising", "Strong Momentum", and "Rising Star".
-        2.  **Most Promising:** Find the stock with the highest RS Score that also has a 52WHL > 0.7 and a positive ROC_10.
-        3.  **Strong Momentum:** Find the stock with the second-highest RS Score.
-        4.  **Rising Star:** Find the stock (not already selected) with the highest `Price %Change D` that also has a 52WHL > 0.6.
-        5.  Fill in the template with the exact data for the selected stocks.
-        6.  The summary must be objective and directly reference the data.
-        7.  If you cannot find stocks that meet all criteria, state that clearly (e.g., "No stocks met the criteria for 'Rising Star' in this selection.") and fill out the sections you can.
-        8.  Your entire response must be in Thai.
-    """
-
-    if st.button("วิเคราะห์หุ้นที่น่าสนใจ"):
-        # Store the prepared data in session state if it doesn't exist
-        if 'ai_datasource' not in st.session_state:
-            data_for_ai_tuple = (
-                rs_score_data, VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
-                source_52SET, source_52mai, perf_source_SET, perf_source_mai,
-                SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod,
-                mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod
+    if st.button("Analyze Now"):
+        if 'ai_datasource' in st.session_state:
+            # Call the AI function with the new filters
+            response = get_ai_response(
+                prompt=user_prompt,
+                market_filter=selected_market,
+                sector_filter=selected_sector,
+                sub_sector_filter=selected_sub_sector
             )
-            st.session_state.ai_datasource = prepare_ai_datasource(data_for_ai_tuple)
-
-        # Call the AI function with filters and display the response in the sidebar
-        response_text = get_ai_response(
-            analysis_prompt, 
-            market_filter=selected_market,
-            sector_filter=selected_sector,
-            sub_sector_filter=selected_sub_sector
-        )
-        if response_text:
-            st.markdown("---")
-            st.markdown(response_text)
+            st.markdown(response)
+        else:
+            st.warning("AI data is still being prepared. Please wait a moment.")
 
