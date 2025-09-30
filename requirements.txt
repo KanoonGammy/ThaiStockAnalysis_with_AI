@@ -11,5 +11,6 @@ seaborn
 google.generativeai
 python-dotenv
 vectorbt
+openai
 
 
