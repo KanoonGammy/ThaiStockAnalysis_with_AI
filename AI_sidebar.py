@@ -138,7 +138,7 @@ def get_ai_response(prompt, data_for_ai_tuple, market_filter="All", sector_filte
                     time.sleep(delay)
                 else:
                     st.error(f"เกิดข้อผิดพลาดระหว่างการวิเคราะห์ของ AI: {e}")
-                    return f"ขออภัย, เกิดข้อผิดพลาดในการวิเคราะห์: {e}"
+                    return f"ขอผิดพลาด, เกิดข้อผิดพลาดในการวิเคราะห์: {e}"
 
         return "ไม่สามารถเชื่อมต่อกับ AI ได้หลังจากการพยายามหลายครั้ง"
 
