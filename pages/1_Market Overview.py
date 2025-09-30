@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import numpy as np
 import seaborn as sns
 from select_market import select_market
-from AI_sidebar import get_ai_response # Import the updated function
+from AI_sidebar import get_ai_response, prepare_ai_datasource # Import both functions
 
 st.set_page_config(layout="wide")
 
@@ -163,7 +163,17 @@ with st.spinner("Preparing data for analysis..."):
         
     SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod = get_vwap_data("SET")
     mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod = get_vwap_data("mai")
-    
+
+    # --- Prepare and "remember" the master AI datasource in session state ---
+    data_for_ai_tuple = (
+        rs_score_data, VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
+        source_52SET, source_52mai, perf_source_SET, perf_source_mai,
+        SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod,
+        mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod
+    )
+    if 'ai_datasource' not in st.session_state:
+        st.session_state.ai_datasource = prepare_ai_datasource(data_for_ai_tuple)
+
 #"""===================================TAB 1 RENDER==================================="""
 with tab1:
     col0, col1 = st.columns([1,3])
@@ -272,6 +282,7 @@ with tab3:
             if symbols_in_sector:
                 fig_stock = make_subplots(rows=len(symbols_in_sector), cols=1, subplot_titles=symbols_in_sector)
                 for i, symbol in enumerate(symbols_in_sector):
+                    if symbol not in dv.columns: continue
                     vol_df = dv[[symbol]].tail(period_stock + 70).copy().fillna(0)
                     threshold = vol_df[symbol].rolling(22).mean() + 2 * vol_df[symbol].rolling(22).std()
                     anomaly = vol_df[symbol] > threshold
@@ -330,26 +341,63 @@ with st.sidebar:
     sub_sector_options = ["All"] + sorted(filtered_subsectors_df['sub-sector'].dropna().unique().tolist())
     selected_sub_sector = st.selectbox("3. เลือก Sub-sector", sub_sector_options, key="sb_sub_sector")
 
+    analysis_prompt = f"""
+        **Persona:** You are a seasoned Technical Analyst providing a clear, actionable summary for an investor. Your analysis must be grounded *exclusively* in the provided data. Your tone should be insightful, objective, and easy to understand.
+
+        **Task:** Based on the filtered data for **Market: '{selected_market}', Sector: '{selected_sector}', Sub-sector: '{selected_sub_sector}'**, identify the most technically outstanding stocks and explain your reasoning.
+
+        **Data Dictionary for Analysis:**
+        - **RS Score & Rank:** Key momentum indicators. A high RS Score (closer to 1) and a low Rank (e.g., < 200) signify strong market outperformance.
+        - **Price/Volume %Change (D, W):** Short-term price action and confirmation. High positive values suggest strong buying interest.
+        - **52WHL:** Position in the 52-week range. A value > 0.8 indicates strength near yearly highs.
+        - **ROC_10:** Short-term (10-day) Rate of Change. Positive value confirms upward momentum.
+
+        **Required Output Format (Strictly follow this structure, using Markdown):**
+
+        #### 📈 บทวิเคราะห์ทางเทคนิค ({datetime.date.today().strftime('%d-%m-%Y')})
+        **เงื่อนไข:** ตลาด `{selected_market}` | Sector `{selected_sector}` | Sub-sector `{selected_sub_sector}`
+        ---
+
+        Based on the data, here are the most technically outstanding stocks:
+
+        **1. 🥇 Most Promising (หุ้นโดดเด่นที่สุด): `[Stock Name]`**
+        * **Why it stands out:** This stock shows the best overall combination of strong momentum and positive short-term signals.
+        * **RS Score:** `[Value]` (Rank: `[Value]`)
+        * **Price Action:** Currently trading near its 52-week high (`52WHL` = `[Value]`) with a strong 10-day momentum (`ROC_10` = `[Value]`).
+        * **Volume Confirmation:** Daily volume change is `[Value of Volume %Change D]%`, confirming buying interest.
+
+        **2. 🥈 Strong Momentum (หุ้นโมเมนตัมแข็งแกร่ง): `[Stock Name]`**
+        * **Why it stands out:** This stock is a clear market outperformer based on its excellent RS Score.
+        * **RS Score:** `[Value]` (Rank: `[Value]`)
+        * **Daily Action:** Price changed by `[Value of Price %Change D]%` today.
+
+        **3. 🥉 Rising Star (หุ้นน่าจับตามอง): `[Stock Name]`**
+        * **Why it stands out:** This stock is showing strong signs of a potential breakout or upward trend.
+        * **Key Signal:** It's near its 52-week high (`52WHL` = `[Value]`) and has a significant positive daily price change (`Price %Change D` = `[Value]`).
+
+        **Analyst's Summary:**
+        * [Provide a 1-2 sentence summary. Briefly mention which factor (e.g., RS Score, proximity to 52WHL) was the most decisive in this selection. Conclude with what an investor should watch for next, e.g., "Investors should watch for continued high volume to confirm the trend for the top selections."].
+
+        **Instructions & Rules:**
+        1.  From the filtered data, identify three different stocks that fit the criteria for "Most Promising", "Strong Momentum", and "Rising Star".
+        2.  **Most Promising:** Find the stock with the highest RS Score that also has a 52WHL > 0.7 and a positive ROC_10.
+        3.  **Strong Momentum:** Find the stock with the second-highest RS Score.
+        4.  **Rising Star:** Find the stock (not already selected) with the highest `Price %Change D` that also has a 52WHL > 0.6.
+        5.  Fill in the template with the exact data for the selected stocks.
+        6.  The summary must be objective and directly reference the data.
+        7.  If you cannot find stocks that meet all criteria, state that clearly (e.g., "No stocks met the criteria for 'Rising Star' in this selection.") and fill out the sections you can.
+        8.  Your entire response must be in Thai.
+    """
+
     if st.button("วิเคราะห์หุ้นที่น่าสนใจ"):
-        analysis_prompt = f"""
-            **Persona:** You are a seasoned Technical Analyst providing a clear, actionable summary for an investor...
-            [Prompt content is long and unchanged, so it's omitted for brevity]
-        """
-        
-        data_for_ai_tuple = (
-            rs_score_data, VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
-            source_52SET, source_52mai, perf_source_SET, perf_source_mai,
-            SET_Stacked_bar, SET_VWAP, SET_VWAP_cumprod,
-            mai_Stacked_bar, mai_VWAP, mai_VWAP_cumprod
-        )
-        
+        # Call the AI function with filters and display the response in the sidebar
         response_text = get_ai_response(
             analysis_prompt, 
-            data_for_ai_tuple,
             market_filter=selected_market,
             sector_filter=selected_sector,
             sub_sector_filter=selected_sub_sector
         )
         if response_text:
+            st.markdown("---")
             st.markdown(response_text)
 
