@@ -93,41 +93,34 @@ def prepare_ai_datasource(data_tuple):
     return AIdata_ALL
 
 
-def get_ai_response(prompt, data_for_ai_tuple, stock_name=None):
+def get_ai_response(prompt, data_for_ai_tuple, market_filter="All", sector_filter="All", sub_sector_filter="All"):
     """
-    Handles a general Q&A interaction with the Google Generative AI model.
+    Handles a general Q&A interaction with the Google Generative AI model,
+    now with filtering capabilities.
     """
     if not GOOGLE_API_KEY:
         return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
 
     try:
-        # --- [DEFINITIVE FIX] Use the official latest model name ---
         if 'model' not in st.session_state:
             st.session_state.model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
         processed_data = prepare_ai_datasource(data_for_ai_tuple)
         
         if processed_data.empty:
-            return "ไม่พบข้อมูลสำหรับวิเคราะห์ กรุณาตรวจสอบว่าข้อมูลถูกโหลดและประมวลผลอย่างถูกต้อง"
+            return "ไม่พบข้อมูลสำหรับวิเคราะห์"
 
-        context_df = pd.DataFrame()
-
-        if stock_name:  # Logic for single stock analysis
-            if stock_name in processed_data["Name"].values:
-                stock_info = processed_data[processed_data["Name"] == stock_name].iloc[0]
-                sector = stock_info.get("sector")
-                market = stock_info.get("market")
-                if pd.notna(sector) and pd.notna(market):
-                    context_df = processed_data[(processed_data["market"] == market) & (processed_data["sector"] == sector)]
-                else:
-                    context_df = processed_data[processed_data["Name"] == stock_name]
-            else:
-                return f"ไม่พบหุ้น '{stock_name}' ในฐานข้อมูล"
-        else:  # Logic for general market analysis
-            context_df = processed_data.dropna(subset=['market', 'sector'])
+        # --- [NEW] Filter data based on user selection ---
+        context_df = processed_data.copy()
+        if market_filter != "All":
+            context_df = context_df[context_df['market'] == market_filter]
+        if sector_filter != "All":
+            context_df = context_df[context_df['sector'] == sector_filter]
+        if sub_sector_filter != "All":
+            context_df = context_df[context_df['sub-sector'] == sub_sector_filter]
 
         if context_df.empty:
-            return "ไม่สามารถหาข้อมูลบริบทสำหรับสร้างคำตอบได้"
+            return "ไม่พบข้อมูลหุ้นตามเงื่อนไขที่คุณเลือก"
         
         csv_string = context_df.to_csv(index=False)
 
@@ -135,7 +128,7 @@ def get_ai_response(prompt, data_for_ai_tuple, stock_name=None):
         base_delay = 5
         for attempt in range(max_retries):
             try:
-                with st.spinner(f"AI กำลังประมวลผล... (ครั้งที่ {attempt + 1}/{max_retries})"):
+                with st.spinner(f"AI กำลังวิเคราะห์... (ครั้งที่ {attempt + 1}/{max_retries})"):
                     response = st.session_state.model.generate_content([prompt, csv_string])
                     return response.text
             except Exception as e:
@@ -152,4 +145,3 @@ def get_ai_response(prompt, data_for_ai_tuple, stock_name=None):
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการเตรียมข้อมูลสำหรับ AI: {e}")
         return f"ขออภัย, เกิดข้อผิดพลาดในการเตรียมข้อมูล: {e}"
-
