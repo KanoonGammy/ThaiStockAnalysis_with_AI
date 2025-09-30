@@ -102,9 +102,9 @@ def get_ai_response(prompt, data_for_ai_tuple, market_filter="All", sector_filte
         return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
 
     try:
-        # --- [DEFINITIVE FIX] Use the stable and widely available 'gemini-pro' model ---
+        # --- [FIXED] Reverted to the model name from your working code ---
         if 'model' not in st.session_state:
-            st.session_state.model = genai.GenerativeModel('gemini-pro')
+            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash')
 
         processed_data = prepare_ai_datasource(data_for_ai_tuple)
         
