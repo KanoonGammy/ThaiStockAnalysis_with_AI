@@ -1,21 +1,19 @@
 # import necessary libraries
 import streamlit as st
-import google.generativeai as genai
+import openai # Import OpenAI library
 import pandas as pd
 import os
-import time # Import the time module for handling delays
+import time
 from dotenv import load_dotenv
 
 # Load environment variables for the API key
 load_dotenv()
-GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+# --- [MODIFIED] Load OpenAI API Key ---
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
-# Configure the generative AI model with the API key
-if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
-else:
-    st.warning("Google API Key not found. Please set it in your environment variables for AI analysis to work.")
-
+# It's good practice to also check for the key existence here
+if not OPENAI_API_KEY:
+    st.warning("OpenAI API Key not found. Please set it in your .env file for AI analysis to work.")
 
 @st.cache_data
 def prepare_ai_datasource(data_tuple):
@@ -55,7 +53,7 @@ def prepare_ai_datasource(data_tuple):
     if not perf_source_mai.empty and perf_source_mai.shape[1] > 1: perf_list.append(perf_source_mai.iloc[:, [0, -1]])
     AIdata_Performance = pd.DataFrame(columns=["Name", "Performance 100 Days"])
     if perf_list:
-        AIdata_Performance = pd.concat(perf_list, ignore_index=True)
+        AIdata_Performance = pd.concat( perf_list, ignore_index=True)
         AIdata_Performance.columns = ["Name", "Performance 100 Days"]
 
     stack_vol_list = []
@@ -67,18 +65,14 @@ def prepare_ai_datasource(data_tuple):
         AIdata_Stacked_Volume.columns = ["Name", "Volume Trade Ratio in Its Sector"]
 
     # --- [FIXED] Merge all data into a single DataFrame ---
-    # Step 1: Merge the two dataframes that contain market/sector info, creating suffixed columns
     AIdata_ALL = rs_score_data.merge(AIdata_52WHL, how="outer", on="Name", suffixes=('_rs', '_52'))
 
-    # Step 2: Coalesce the suffixed columns back into single 'market' and 'sector' columns
     for col in ['market', 'sector', 'sub-sector']:
-        col_rs = f'{col}_rs'
-        col_52 = f'{col}_52'
+        col_rs, col_52 = f'{col}_rs', f'{col}_52'
         if col_rs in AIdata_ALL.columns and col_52 in AIdata_ALL.columns:
             AIdata_ALL[col] = AIdata_ALL[col_rs].fillna(AIdata_ALL[col_52])
             AIdata_ALL = AIdata_ALL.drop(columns=[col_rs, col_52])
 
-    # Step 3: Merge the rest of the dataframes which do not contain market/sector info
     dfs_to_merge = [
         VP_change_D_data, VP_change_W_data, VP_change_M_data, VP_change_3M_data,
         AIdata_Performance, AIdata_Stacked_Volume
@@ -87,28 +81,22 @@ def prepare_ai_datasource(data_tuple):
         if not df.empty and 'Name' in df.columns:
              AIdata_ALL = AIdata_ALL.merge(df, how="outer", on="Name")
 
-    # Final clean up of any duplicates
     AIdata_ALL = AIdata_ALL.loc[:,~AIdata_ALL.columns.duplicated()]
-
     return AIdata_ALL
 
 
 def get_ai_response(prompt, market_filter="All", sector_filter="All", sub_sector_filter="All"):
     """
-    Handles a general Q&A interaction with the Google Generative AI model.
-    It now reads the prepared data from st.session_state and uses the requested Flash model.
+    Handles a general Q&A interaction with the OpenAI API.
     """
-    if not GOOGLE_API_KEY:
-        return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
+    if not OPENAI_API_KEY:
+        return "ข้อผิดพลาด: ไม่พบ OpenAI API Key กรุณาตั้งค่าในไฟล์ .env"
 
     try:
-        # --- [MODIFIED] Use 'gemini-1.5-flash-latest' as requested ---
-        if 'model' not in st.session_state:
-            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # --- [MODIFIED] Initialize OpenAI client ---
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-        # --- Read prepared data from session_state ---
         processed_data = st.session_state.get('ai_datasource')
-
         if processed_data is None or processed_data.empty:
             return "ไม่พบข้อมูลสำหรับวิเคราะห์ กรุณารอให้ข้อมูลโหลดเสร็จสมบูรณ์"
 
@@ -126,25 +114,31 @@ def get_ai_response(prompt, market_filter="All", sector_filter="All", sub_sector
 
         csv_string = context_df.to_csv(index=False)
 
-        max_retries = 5
-        base_delay = 5
-        for attempt in range(max_retries):
-            try:
-                with st.spinner(f"AI กำลังวิเคราะห์... (ครั้งที่ {attempt + 1}/{max_retries})"):
-                    response = st.session_state.model.generate_content([prompt, csv_string])
-                    return response.text
-            except Exception as e:
-                if "429" in str(e) and attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    st.warning(f"Rate limit reached. กำลังลองใหม่ในอีก {delay} วินาที...")
-                    time.sleep(delay)
-                else:
-                    st.error(f"เกิดข้อผิดพลาดระหว่างการวิเคราะห์ของ AI: {e}")
-                    return f"ขออภัย, เกิดข้อผิดพลาดในการวิเคราะห์: {e}"
+        # --- [MODIFIED] API call to OpenAI ---
+        # Create a combined message for the user role
+        full_user_prompt = f"""
+        Here is the user's request:
+        ---
+        {prompt}
+        ---
 
-        return "ไม่สามารถเชื่อมต่อกับ AI ได้หลังจากการพยายามหลายครั้ง"
+        Analyze the following CSV data to answer the request:
+        ---
+        {csv_string}
+        ---
+        """
+
+        with st.spinner("OpenAI กำลังวิเคราะห์..."):
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert AI technical analyst for the stock market. Your entire analysis must be based *only* on the provided CSV data."},
+                    {"role": "user", "content": full_user_prompt}
+                ]
+            )
+            return response.choices[0].message.content
 
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการเตรียมข้อมูลสำหรับ AI: {e}")
-        return f"ขออภัย, เกิดข้อผิดพลาดในการเตรียมข้อมูล: {e}"
+        st.error(f"เกิดข้อผิดพลาดระหว่างการวิเคราะห์ของ AI: {e}")
+        return f"ขออภัย, เกิดข้อผิดพลาดในการวิเคราะห์: {e}"
 
