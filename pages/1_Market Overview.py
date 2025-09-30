@@ -118,8 +118,8 @@ with st.spinner("Preparing data for analysis..."):
     geo_df = geo_df.merge(raw_std, left_on="Name", right_on="symbol", how="left").drop(["full name", "symbol"], axis=1)
     SET_t2 = geo_df[geo_df["market"] == "SET"]
     mai_t2 = geo_df[geo_df["market"] == "mai"]
-    perf_source_SET = pd.pivot(SET_t2, index="Name", columns="Date", values="Return").reset_index()
-    perf_source_mai = pd.pivot(mai_t2, index="Name", columns="Date", values="Return").reset_index()
+    perf_source_SET = pd.pivot_table(SET_t2, index="Name", columns="Date", values="Return").reset_index()
+    perf_source_mai = pd.pivot_table(mai_t2, index="Name", columns="Date", values="Return").reset_index()
 
     df_52 = dp.tail(265)
     df_close = df_52.iloc[-1].rename("Close")
@@ -290,7 +290,8 @@ with tab3:
                 va_df = va_df.merge(temp_mc, left_on="Name", right_on="Symbols").drop("Symbols", axis=1)
                 va_df["Weighted_Volume"] = va_df["Volume"] * va_df["weight"]
                 
-                pivot_va = pd.pivot_table(va_df, index="Date", values="Weighted_Volume", aggfunc="sum")
+                # --- [FIXED] Use groupby().sum() to ensure a 1D Series is returned ---
+                pivot_va = va_df.groupby('Date')['Weighted_Volume'].sum()
                 threshold = pivot_va.rolling(22).mean() + 2 * pivot_va.rolling(22).std()
                 anomaly = pivot_va > threshold
                 
