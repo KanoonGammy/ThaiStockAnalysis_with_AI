@@ -21,7 +21,7 @@ else:
 def prepare_ai_datasource(data_tuple):
     """
     Prepares and merges all necessary data sources into a single DataFrame for AI analysis.
-    This version fixes the KeyError for 'market' and 'sector' by properly handling merge suffixes.
+    This function is cached by Streamlit to avoid re-computation.
     """
     # Clean all dataframes in the tuple
     cleaned_tuple = []
@@ -93,23 +93,24 @@ def prepare_ai_datasource(data_tuple):
     return AIdata_ALL
 
 
-def get_ai_response(prompt, data_for_ai_tuple, market_filter="All", sector_filter="All", sub_sector_filter="All"):
+def get_ai_response(prompt, market_filter="All", sector_filter="All", sub_sector_filter="All"):
     """
-    Handles a general Q&A interaction with the Google Generative AI model,
-    now with filtering capabilities and a stable model.
+    Handles a general Q&A interaction with the Google Generative AI model.
+    It now reads the prepared data from st.session_state instead of receiving it as an argument.
     """
     if not GOOGLE_API_KEY:
         return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
 
     try:
-        # --- [DEFINITIVE FIX] Use the stable 'gemini-pro' model to prevent 404 errors ---
+        # --- Use 'gemini-1.5-flash' model as requested ---
         if 'model' not in st.session_state:
-            st.session_state.model = genai.GenerativeModel('gemini-pro')
+            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash')
 
-        processed_data = prepare_ai_datasource(data_for_ai_tuple)
-        
-        if processed_data.empty:
-            return "ไม่พบข้อมูลสำหรับวิเคราะห์"
+        # --- Read prepared data from session_state ---
+        processed_data = st.session_state.get('ai_datasource')
+
+        if processed_data is None or processed_data.empty:
+            return "ไม่พบข้อมูลสำหรับวิเคราะห์ กรุณารอให้ข้อมูลโหลดเสร็จสมบูรณ์"
 
         # Filter data based on user selection
         context_df = processed_data.copy()
@@ -122,7 +123,7 @@ def get_ai_response(prompt, data_for_ai_tuple, market_filter="All", sector_filte
 
         if context_df.empty:
             return "ไม่พบข้อมูลหุ้นตามเงื่อนไขที่คุณเลือก"
-        
+
         csv_string = context_df.to_csv(index=False)
 
         max_retries = 5
