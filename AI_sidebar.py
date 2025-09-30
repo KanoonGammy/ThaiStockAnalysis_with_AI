@@ -96,15 +96,15 @@ def prepare_ai_datasource(data_tuple):
 def get_ai_response(prompt, market_filter="All", sector_filter="All", sub_sector_filter="All"):
     """
     Handles a general Q&A interaction with the Google Generative AI model.
-    It now reads the prepared data from st.session_state and uses a stable model.
+    It now reads the prepared data from st.session_state and uses the requested Flash model.
     """
     if not GOOGLE_API_KEY:
         return "ข้อผิดพลาด: ไม่พบ Google API Key กรุณาตั้งค่าในไฟล์ .env"
 
     try:
-        # --- [DEFINITIVE FIX] Use the stable 'gemini-pro' model to prevent 404 errors ---
+        # --- [MODIFIED] Use 'gemini-1.5-flash-latest' as requested ---
         if 'model' not in st.session_state:
-            st.session_state.model = genai.GenerativeModel('gemini-pro')
+            st.session_state.model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
         # --- Read prepared data from session_state ---
         processed_data = st.session_state.get('ai_datasource')
